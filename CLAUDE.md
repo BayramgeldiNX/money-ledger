@@ -2,7 +2,8 @@
 
 A personal money tracker (PWA) for one owner: spending by section with the reason, income, wallets, debts, limits, and reports,
 in yuan (main) and dollars. Built first as a claude.ai Artifact, now a standalone app like the owner's `xiezi` project.
-Used on iPhone 16 (home-screen app) and Windows. English only.
+Live at https://bayramgeldinx.github.io/money-ledger/ (GitHub Pages; pushing to `main` runs tests, builds and deploys).
+Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `firestore.rules`). Used on iPhone 16 (home-screen app) and Windows. English only.
 
 ## Rules (always)
 - **Design:** minimalist, premium bank-app feel. Yuan is the main number; dollars sit under it, in black. **Spending is red.**
@@ -47,6 +48,6 @@ Used on iPhone 16 (home-screen app) and Windows. English only.
 
 ## Next steps
 1. ~~Firebase~~ done in code: `src/sync/` (sign-in card in Settings, Firestore under `users/{uid}/`). Needs the owner to create the Firebase project, then `npm run setup:firebase -- <project-id>`. Test locally with `npm run emulators` + `npm run dev:emulator`. Move data over with the app's Backup → Restore.
-2. Deploy: GitHub Pages workflow on push to `main`; point the Desktop shortcut and iPhone icon at the new link.
+2. ~~Deploy~~ done. Still to do: point the Desktop shortcut and iPhone Home Screen icon at the new link once the data is moved over (Settings → Backup in the old Artifact, then Restore here).
 3. Split `app.js` into `src/views/*`; add Playwright screen/sync checks like xiezi.
 4. Optional: bring back the Claude review / receipt reading through a small cloud function.

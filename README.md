@@ -18,4 +18,4 @@ npm test         # money rules
 npm run build    # production build in dist/ (with offline support)
 ```
 
-Data is kept on the device (localStorage) until sign-in and sync are added. See `CLAUDE.md` for the layout and next steps.
+Live: https://bayramgeldinx.github.io/money-ledger/ . Sign in under Settings to sync; signed out, data stays on the device (localStorage). See `CLAUDE.md` for the layout and next steps.
