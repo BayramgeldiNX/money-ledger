@@ -1,0 +1,52 @@
+# Money Ledger — notes for Claude
+
+A personal money tracker (PWA) for one owner: spending by section with the reason, income, wallets, debts, limits, and reports,
+in yuan (main) and dollars. Built first as a claude.ai Artifact, now a standalone app like the owner's `xiezi` project.
+Used on iPhone 16 (home-screen app) and Windows. English only.
+
+## Rules (always)
+- **Design:** minimalist, premium bank-app feel. Yuan is the main number; dollars sit under it, in black. **Spending is red.**
+  No streaks, goals, or gamification. Keep Home simple: Money left + today's food limit only. Detail belongs on other screens.
+- **Numbers must be right.** Never round the owner's decimals away (12.8 stays ¥12.80). Accept comma decimals ("12,8").
+  Rate: ¥6.70 = $1 (editable in Settings). Whole numbers show no decimals; others show two.
+- **Money rules** (in `src/lib/ledger.js`, tested):
+  - Left = income − spent − saved. Savings count as saved, not spent. Debts never touch monthly totals.
+  - A wallet changes only for things dated after its balance was set (`afterSet`). Dollar wallets keep dollars;
+    a move between ¥ and $ wallets stores the amount the owner really received (`amountTo`).
+- **Defaults:** new entries start on ¥ and **Alipay**. Every entry starts in yuan.
+- **Privacy:** the owner's real data never goes into git. `tests/fixtures/` is gitignored (`real.json` = an export of the data).
+  Never put the owner's email, passwords, or Firebase admin or service-account keys in the repo. (The Firebase web config in `src/sync/firebase-config.js` is public by design and is committed, like xiezi.) Never create accounts or type passwords for the owner.
+- The owner is in China on a VPN (Clash, proxy `http://127.0.0.1:7897`). Firebase and GitHub need it; set `HTTPS_PROXY`
+  for network scripts and use `node --use-env-proxy`. `npm install` worked without it.
+- Commits: use the same noreply author as the `xiezi` repo, and end with the `Co-Authored-By` line the session gives. Commit only when asked.
+- Token budget is tight: read only the files a task touches; don't re-run full sweeps unless asked.
+
+## Stack and layout
+- Vite + vite-plugin-pwa (generateSW, `autoUpdate`), base `/money-ledger/` for builds, `/` in dev. Plain JS, no framework.
+- `index.html`: the screens' markup. `src/styles.css`: all CSS (light/dark tokens, iPhone safe areas). `src/main.js` loads everything.
+- `src/app.js`: the app (state, rendering, forms, reports). Still one big file, being split into `src/views/` over time.
+- `src/lib/`: `format.js` (money text, parseAmt), `dates.js`, `ledger.js` (stats + wallet math). **Pure and tested** — put new math here.
+- `src/platform.js`: stand-in for what the Artifact gave (`window.claude.use("db" | "sample" | "downloads")`).
+  - `db` → `null` for now, so data lives in `localStorage` (`ml.*` keys). Next step: Firestore with the same small API.
+  - `sample` → `null`: the Claude money review and receipt photo reading are off (needs a server + API key).
+  - `downloads` → a normal file download; PDF libraries (html2canvas, jsPDF) are bundled and loaded on demand.
+- `tests/`: Vitest. `real-data.test.js` runs only if `tests/fixtures/real.json` exists.
+- `archive/artifact-version.html`: the last claude.ai Artifact build (v48), kept for reference only.
+- `design/`: icon artwork + `make-icons.ps1`. `scripts/gen-icons.mjs` builds `public/` icons from it (`npm run gen:icons`).
+
+## Data model (collections in the Artifact; same shape for Firestore)
+- `expenses/{id}`: `{ date, amount, currency, rate, usd, rmb, cat, kind (need|want|save|income), type?: "income", reason, method, note, createdAt, bill?, billId? }`
+- `config/main`: `{ rate, rateSetAt, foodLimit, foodCats, categories[], incomeCats[], wallets[], bills[], limits[], later[], lastBackupAt }`
+  - wallet `{ id, name, icon, color, methods[], currency, balance, setAt }`; limit `{ id, name, cats[], amount, period: week|month }`;
+    waiting-list item `{ id, reason, amount, currency, cat, method, addedAt, forMonth }`.
+- `debts/{id}`, `transfers/{id}`, `billruns/{id}`, `reviews/{key}`.
+- Offline: every change goes to a local outbox first and is sent when online (see `initStore` in `app.js`).
+
+## Commands
+- `npm run dev` (port 5173; the preview config in `.claude/launch.json` uses 5180) · `npm run build` · `npm test` · `npm run gen:icons`
+
+## Next steps
+1. ~~Firebase~~ done in code: `src/sync/` (sign-in card in Settings, Firestore under `users/{uid}/`). Needs the owner to create the Firebase project, then `npm run setup:firebase -- <project-id>`. Test locally with `npm run emulators` + `npm run dev:emulator`. Move data over with the app's Backup → Restore.
+2. Deploy: GitHub Pages workflow on push to `main`; point the Desktop shortcut and iPhone icon at the new link.
+3. Split `app.js` into `src/views/*`; add Playwright screen/sync checks like xiezi.
+4. Optional: bring back the Claude review / receipt reading through a small cloud function.

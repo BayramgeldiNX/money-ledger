@@ -1,0 +1,8 @@
+node_modules
+dist
+.env*
+*.log
+.claude/settings.local.json
+tests/fixtures/
+!.env.emulator
+*-debug.log

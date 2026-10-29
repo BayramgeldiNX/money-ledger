@@ -1,0 +1,1 @@
+{"version":"0.0.1","configurations":[{"name":"money-ledger","runtimeExecutable":"npm","runtimeArgs":["run","dev","--","--port","5180","--strictPort"],"port":5180},{"name":"money-ledger-emulator","runtimeExecutable":"npm","runtimeArgs":["run","dev:emulator"],"port":5181}]}

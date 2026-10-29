@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#F2F2F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Money Ledger">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>Money Ledger</title>
+<link rel="icon" href="./favicon.ico">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+</head>
+<body>
+<header class="top">
+  <div class="wrap" id="top-wrap">
+    <h1 class="brand"><span class="logo" aria-hidden="true"><svg viewBox="0 0 1024 1024"><g fill="none" stroke="#fff" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"><path d="M352 300 512 515 672 300M512 515v255M392 570h240M392 680h240"/></g><circle cx="780" cy="250" r="56" fill="#46C77F"/></svg></span>Money Ledger</h1>
+    <div class="month-switch" aria-label="Month">
+      <button id="m-prev" type="button" aria-label="Previous month">‹</button>
+      <span class="label" id="m-label">—</span>
+      <button id="m-next" type="button" aria-label="Next month">›</button>
+    </div>
+  </div>
+</header>
+
+<div class="tabs-bar">
+  <nav class="wrap tabs" id="tabs-wrap" role="tablist" aria-label="Screens">
+    <button role="tab" id="t-home" data-view="home" aria-selected="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6h-6v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+    <button role="tab" id="t-report" data-view="report" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 1 0 9 9h-9z"/><path d="M15 3.5A9 9 0 0 1 20.5 9H15z"/></svg>Report</button>
+    <button role="tab" id="t-wallets" data-view="wallets" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H18v3"/><path d="M4 7.5v9A2.5 2.5 0 0 0 6.5 19H20V8H6.5A2.5 2.5 0 0 1 4 7.5z"/><circle cx="16" cy="13.5" r="1" fill="currentColor"/></svg>Wallets</button>
+    <button role="tab" id="t-debts" data-view="debts" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3.5-3.5M20 16H7l3.5 3.5"/></svg>Debts</button>
+    <button role="tab" id="t-limits" data-view="limits" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 16a8 8 0 1 1 16 0"/><path d="M12 16l4.2-4.6"/><circle cx="12" cy="16" r="1.3"/></svg><span>Limits</span><i class="tab-dot" id="limits-dot" hidden></i></button>
+    <button role="tab" id="t-settings" data-view="settings" aria-selected="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>Settings</button>
+  </nav>
+</div>
+
+<main class="wrap" id="main">
+  <div id="banners"></div>
+
+  <!-- HOME -->
+  <section id="v-home">
+    <div class="card summary" id="summary"></div>
+
+    <div class="toolbar on-bg">
+      <h2 class="list-title" id="list-title">Entries</h2>
+      <label class="icon-btn date-btn" id="date-btn" title="Go to a date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><input type="date" id="jump" aria-label="Go to a date"></label>
+      <button type="button" class="icon-btn" id="search-btn" aria-label="Search" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
+    </div>
+    <div class="search-row" id="search-row" hidden>
+      <input class="input" id="flt-q" type="search" placeholder="Search reasons, sections, notes" aria-label="Search">
+      <button type="button" class="chip plain" id="search-all" aria-pressed="false">All months</button>
+    </div>
+    <div class="filter-row" id="filter-row" hidden></div>
+
+    <div class="day-bar" id="day-bar" hidden></div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="entries" id="month-list"></div>
+    </div>
+  </section>
+
+  <!-- REPORT -->
+  <section id="v-report" class="stack" hidden></section>
+
+  <!-- WALLETS -->
+  <section id="v-wallets" class="stack" hidden></section>
+
+  <!-- DEBTS -->
+  <section id="v-debts" class="stack" hidden></section>
+  <section id="v-limits" class="stack" hidden></section>
+
+  <!-- SETTINGS -->
+  <section id="v-settings" class="stack" hidden>
+    <div class="settings-grid">
+      <div class="card stack" id="acct-card"></div>
+      <div class="card stack">
+        <div class="head"><h2>Daily food limit</h2></div>
+        <div class="field">
+          <label for="s-food">Yuan per day (0 turns it off)</label>
+          <input class="input" id="s-food" inputmode="decimal">
+        </div>
+        <p class="hint" style="margin:0" id="s-food-hint"></p>
+      </div>
+      <div class="card stack">
+        <div class="head"><h2>Your limits</h2></div>
+        <p class="hint" style="margin:0" id="s-lim-hint"></p>
+        <button type="button" class="btn" id="s-go-limits" style="align-self:flex-start">Open Limits</button>
+      </div>
+      <div class="card stack">
+        <div class="head"><h2>Exchange rate</h2></div>
+        <div class="field">
+          <label for="s-rate">How many yuan is $1?</label>
+          <input class="input" id="s-rate" inputmode="decimal">
+        </div>
+        <p class="hint" style="margin:0">Used for new entries. Saved entries keep their own rate.</p>
+      </div>
+    </div>
+    <div class="card stack">
+      <div class="head"><h2>Monthly bills</h2><span class="hint">Added automatically on their day each month</span></div>
+      <div class="entries" id="bills-list"></div>
+      <div class="bill-add">
+        <input class="input" id="b-name" maxlength="60" placeholder="Name, e.g. Phone bill" aria-label="Bill name">
+        <select class="input" id="b-cat" aria-label="Section"></select>
+        <div class="bill-amt">
+          <select class="input" id="b-cur" aria-label="Currency"><option value="RMB">¥</option><option value="USD">$</option></select>
+          <input class="input" id="b-amount" inputmode="decimal" placeholder="Amount" aria-label="Amount">
+        </div>
+        <input class="input" id="b-day" inputmode="numeric" placeholder="Day (1–31)" aria-label="Day of month">
+        <select class="input" id="b-method" aria-label="Paid with"></select>
+        <button type="button" class="btn primary" id="b-add">Add bill</button>
+      </div>
+      <span class="form-msg" id="b-msg" role="status"></span>
+    </div>
+    <div class="card stack">
+      <div class="head"><h2>Sections and monthly budgets</h2><span class="hint">Budget in ¥. Leave 0 for none.</span></div>
+      <div class="cat-row cat-head"><span></span><span>Name</span><span>Type</span><span>Budget (¥)</span><span></span></div>
+      <div class="cat-table" id="s-cats"></div>
+      <div><button type="button" class="btn" id="s-addcat">+ Add section</button></div>
+    </div>
+    <div class="card stack">
+      <div class="head"><h2>Income sources</h2><span class="hint">Where your money comes from</span></div>
+      <div class="cat-table" id="s-incs"></div>
+      <div><button type="button" class="btn" id="s-addinc">+ Add source</button></div>
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn primary" id="s-save">Save settings</button>
+      <span class="form-msg" id="s-msg" role="status"></span>
+    </div>
+    <div class="card stack">
+      <div class="head"><h2>Backup and restore</h2><span class="hint" id="bk-last"></span></div>
+      <p class="hint" style="margin:0">A backup is one file with everything: expenses, income, debts, wallets, monthly bills and settings. Keep it in Files, iCloud or email it to yourself. You can load it back here any time.</p>
+      <div class="form-actions">
+        <button type="button" class="btn primary" id="bk-save">Download backup</button>
+        <label class="btn" id="bk-load-btn" style="cursor:pointer;position:relative;overflow:hidden">Restore from a backup<input type="file" id="bk-file" accept=".json,application/json" style="position:absolute;inset:0;opacity:0;cursor:pointer"></label>
+      </div>
+      <div id="bk-panel" hidden></div>
+      <span class="form-msg" id="bk-msg" role="status"></span>
+    </div>
+    <div class="card stack">
+      <div class="head"><h2>Download</h2></div>
+      <div class="form-actions">
+        <button type="button" class="btn" id="x-month">This month (CSV)</button>
+        <button type="button" class="btn" id="x-all">Everything (CSV)</button>
+        <button type="button" class="btn primary" id="x-pdf">This month's statement (PDF)</button>
+        <span class="hint" id="x-msg"></span>
+      </div>
+      <p class="hint" style="margin:0" id="storage-line"></p>
+    </div>
+  </section>
+</main>
+
+<button type="button" class="fab" id="fab" aria-label="Add expense"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg></button>
+
+<div class="scrim" id="scrim" hidden></div>
+<div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="form-title" hidden>
+  <div class="grab" aria-hidden="true"></div>
+  <form id="add-form" class="stack" autocomplete="off" novalidate>
+    <div class="sheet-head"><h2 id="form-title">Add expense</h2><button type="button" class="close-btn" id="sheet-close" aria-label="Close">✕</button></div>
+    <div class="seg type-seg" id="f-type" role="group" aria-label="Expense or income">
+      <button type="button" data-type="expense" aria-pressed="true">Expense</button>
+      <button type="button" data-type="income" aria-pressed="false">Income</button>
+    </div>
+    <div class="amount-line">
+      <div class="cur-toggle" role="group" aria-label="Currency">
+        <button type="button" data-cur="RMB" aria-pressed="true" aria-label="Yuan">¥</button>
+        <button type="button" data-cur="USD" aria-pressed="false" aria-label="Dollars">$</button>
+      </div>
+      <input id="f-amount" inputmode="decimal" enterkeyhint="done" placeholder="0" aria-label="Amount">
+    </div>
+    <div class="convert" id="f-convert"></div>
+    <div class="stack favs" id="favs" hidden></div>
+    <div class="smart" id="smart">
+      <div class="smart-row">
+        <input class="input" id="smart-in" maxlength="200" enterkeyhint="go" placeholder="Or type it: lunch 38 wechat" aria-label="Describe it in words and the form fills itself">
+        <button type="button" class="icon-btn" id="smart-go" aria-label="Fill the form from this text"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg></button>
+        <label class="icon-btn" id="smart-photo" title="Read a receipt photo" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5A2.5 2.5 0 0 1 6.5 6h1.8l1.5-2h4.4l1.5 2h1.8A2.5 2.5 0 0 1 20 8.5v9a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 17.5z"/><circle cx="12" cy="13" r="3.5"/></svg><input type="file" id="smart-file" accept="image/*" aria-label="Read a receipt photo"></label>
+      </div>
+      <div class="smart-msg" id="smart-msg" role="status"></div>
+    </div>
+    <div class="field">
+      <span class="label" id="l-cats">What for</span>
+      <div class="chips" id="f-cats"></div>
+    </div>
+    <div class="field">
+      <label for="f-reason" id="l-reason">Why</label>
+      <input class="input" id="f-reason" list="reason-suggest" maxlength="120" placeholder="e.g. lunch with colleagues">
+      <datalist id="reason-suggest"></datalist>
+    </div>
+    <div class="field">
+      <span class="label" id="l-method">Paid with</span>
+      <div class="chips" id="f-method"></div>
+    </div>
+    <details class="more" id="more">
+      <summary>More options <span class="hint" id="more-sum">Today · Need</span></summary>
+      <div class="stack">
+        <div class="row">
+          <div class="field">
+            <label for="f-date">Date</label>
+            <input class="input" type="date" id="f-date">
+          </div>
+          <div class="field" id="kind-field">
+            <span class="label">Type</span>
+            <div class="seg" id="f-kind" role="group" aria-label="Type">
+              <button type="button" data-kind="need" aria-pressed="true">Need</button>
+              <button type="button" data-kind="want" aria-pressed="false">Want</button>
+              <button type="button" data-kind="save" aria-pressed="false">Savings</button>
+            </div>
+          </div>
+        </div>
+        <div class="field">
+          <label for="f-note">Note</label>
+          <input class="input" id="f-note" maxlength="200" placeholder="Shop, person, detail">
+        </div>
+      </div>
+    </details>
+    <div class="shop-warn" id="f-shop" role="status" hidden></div>
+    <div class="form-msg" id="f-msg" role="status"></div>
+    <div class="form-actions">
+      <button type="submit" class="btn primary big" id="f-submit">Save</button>
+      <button type="button" class="btn danger" id="f-delete" hidden>Delete</button>
+    </div>
+    <button type="button" class="link-btn" id="f-repeat" hidden>Repeat this every month</button>
+  </form>
+</div>
+<div class="sheet" id="dsheet" role="dialog" aria-modal="true" aria-labelledby="d-title" hidden>
+  <div class="grab" aria-hidden="true"></div>
+  <form id="debt-form" class="stack" autocomplete="off" novalidate>
+    <div class="sheet-head"><h2 id="d-title">Add debt</h2><button type="button" class="close-btn" id="dsheet-close" aria-label="Close">✕</button></div>
+    <div class="seg type-seg debt-dir" id="d-dir" role="group" aria-label="Who owes whom">
+      <button type="button" data-dir="owed" aria-pressed="true">They owe me</button>
+      <button type="button" data-dir="owe" aria-pressed="false">I owe them</button>
+    </div>
+    <div class="field">
+      <label for="d-person">Person</label>
+      <input class="input" id="d-person" list="d-people" maxlength="60" placeholder="Name, e.g. Li Wei" autocapitalize="words">
+      <datalist id="d-people"></datalist>
+    </div>
+    <div class="amount-line">
+      <div class="cur-toggle" id="d-cur" role="group" aria-label="Currency">
+        <button type="button" data-cur="RMB" aria-pressed="true" aria-label="Yuan">¥</button>
+        <button type="button" data-cur="USD" aria-pressed="false" aria-label="Dollars">$</button>
+      </div>
+      <input id="d-amount" class="d-amount" inputmode="decimal" enterkeyhint="done" placeholder="0" aria-label="Amount">
+    </div>
+    <div class="field">
+      <label for="d-reason">What for</label>
+      <input class="input" id="d-reason" maxlength="100" placeholder="e.g. dinner, rent share, borrowed cash">
+    </div>
+    <div class="row">
+      <div class="field">
+        <label for="d-start">Date</label>
+        <input class="input" type="date" id="d-start">
+      </div>
+      <div class="field">
+        <label for="d-due">Pay back by</label>
+        <input class="input" type="date" id="d-due">
+      </div>
+    </div>
+    <div class="chips" id="d-quick">
+      <button type="button" class="chip plain" data-due="7">In 1 week</button>
+      <button type="button" class="chip plain" data-due="14">2 weeks</button>
+      <button type="button" class="chip plain" data-due="30">1 month</button>
+      <button type="button" class="chip plain" data-due="0">No date</button>
+    </div>
+    <div class="field" id="d-wallet-field" hidden>
+      <span class="label" id="d-wallet-label">Paid from</span>
+      <div class="chips" id="d-wallet"></div>
+      <span class="hint" id="d-wallet-hint"></span>
+    </div>
+    <div class="form-msg" id="d-msg" role="status"></div>
+    <div class="form-actions"><button type="submit" class="btn primary big" id="d-save">Save</button></div>
+  </form>
+</div>
+<div class="toast" id="toast" hidden></div>
+<script type="module" src="/src/main.js"></script>
+</body>
+</html>

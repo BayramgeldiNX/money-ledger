@@ -1,0 +1,39 @@
+import { syncAvailable, currentUser, makeDb } from "./sync/firebase.js";
+
+// Stand-in for the pieces the claude.ai Artifact used to provide.
+// The app asks for them through window.claude.use(name); here each one is a normal browser feature.
+//   "db"        -> your Firestore account when you are signed in; otherwise null, and the app keeps its data on this device.
+//   "sample"    -> null: Claude-written money review and receipt reading are off in the standalone app.
+//   "downloads" -> a plain file download.
+
+function saveFile({ filename, data }) {
+  const type = /\.csv$/i.test(filename) ? "text/csv;charset=utf-8" : /\.json$/i.test(filename) ? "application/json" : "application/octet-stream";
+  // a leading BOM makes Excel read Chinese text in a CSV correctly
+  const blob = data instanceof Blob ? data : new Blob(/\.csv$/i.test(filename) ? ["﻿", data] : [data], { type });
+  const url = URL.createObjectURL(blob), a = document.createElement("a");
+  a.href = url; a.download = filename; a.rel = "noopener";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+  return Promise.resolve();
+}
+
+const capabilities = {
+  db: async () => {
+    if (!syncAvailable) return null;
+    try { const u = await currentUser(); return u ? await makeDb(u.uid) : null; }
+    catch (e) { console.error(e); window.__sync.error = true; return null; }
+  },
+  sample: async () => null,
+  downloads: async () => ({ save: saveFile }),
+};
+
+window.__sync = { available: syncAvailable, error: false };
+window.claude = { use: async (name) => (capabilities[name] ? capabilities[name]() : null) };
+
+// PDF statement libraries are bundled with the app and loaded only when needed.
+window.__loadPdfLibs = async () => {
+  if (window.jspdf && window.html2canvas) return;
+  const [h2c, pdf] = await Promise.all([import("html2canvas"), import("jspdf")]);
+  window.html2canvas = h2c.default;
+  window.jspdf = { jsPDF: pdf.jsPDF || (pdf.default && pdf.default.jsPDF) || pdf.default };
+};

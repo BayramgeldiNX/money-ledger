@@ -1,0 +1,29 @@
+{
+  "name": "money-ledger",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Money Ledger — personal expense, wallet, debt and limit tracker in yuan and dollars (PWA)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "gen:icons": "node scripts/gen-icons.mjs",
+    "emulators": "firebase emulators:start --only auth,firestore --project demo-money-ledger",
+    "dev:emulator": "vite --mode emulator --host 127.0.0.1 --port 5181 --strictPort",
+    "setup:firebase": "node scripts/setup-firebase.mjs"
+  },
+  "dependencies": {
+    "@fontsource/plus-jakarta-sans": "^5.3.0",
+    "firebase": "^13.1.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.5",
+    "vite": "^8.3.5",
+    "vite-plugin-pwa": "^2.0.0",
+    "vitest": "^5.0.5"
+  }
+}
