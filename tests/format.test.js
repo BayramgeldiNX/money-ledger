@@ -1,5 +1,17 @@
 import { describe, it, expect } from "vitest";
-import { parseAmt, amountInText, rmb0, usd, usd0, rmb, smart, pct, ordinal, listJoin, compactRmb } from "../src/lib/format.js";
+import { parseAmt, amountInText, rmb0, usd, usd0, rmb, smart, pct, ordinal, listJoin, compactRmb, csvCell } from "../src/lib/format.js";
+
+describe("csvCell", () => {
+  it("quotes commas, quotes and new lines", () => {
+    expect(csvCell('a,"b"\nc')).toBe('"a,""b""\nc"');
+  });
+  it("stops typed text from running as a formula, but leaves numbers alone", () => {
+    expect(csvCell("=SUM(A1)", true)).toBe("'=SUM(A1)");
+    expect(csvCell("-5 coffee", true)).toBe("'-5 coffee");
+    expect(csvCell(-12.8)).toBe("-12.8");
+    expect(csvCell(null, true)).toBe("");
+  });
+});
 
 describe("parseAmt", () => {
   it("reads dot and comma decimals", () => {

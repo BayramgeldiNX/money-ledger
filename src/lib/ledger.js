@@ -60,8 +60,14 @@ export const inWalletCur = (w, d, amt, rate) => {
 // data = { expenses, debts, transfers, wallets }; names = { cat(id) -> name } only used for the label.
 export function walletMoves(w, data, rate, catName = (id) => id) {
   const moves = [];
+  // A payment method belongs to the first wallet that lists it (the one the add form names), so two wallets
+  // sharing a method never both take the same expense off.
+  const owns = (e) => {
+    const first = (data.wallets || []).find((x) => x.methods.includes(e.method));
+    return first ? first.id === w.id : w.methods.includes(e.method);
+  };
   data.expenses.forEach((e) => {
-    if (!afterSet(w, e.date, e.createdAt) || !w.methods.includes(e.method)) return;
+    if (!afterSet(w, e.date, e.createdAt) || !owns(e)) return;
     const v = wCur(w) === "USD" ? U(e) : R(e);
     moves.push({ at: e.createdAt, date: e.date, label: e.reason || catName(e.cat), amt: isInc(e) ? v : -v });
   });

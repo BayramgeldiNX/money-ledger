@@ -37,6 +37,12 @@ export const amountInText = (text) => {
   const all = (t.match(new RegExp(NUM, "g")) || []).map(parseAmt).filter((n) => isFinite(n));
   return all.length ? Math.max(...all) : null;
 };
+// One CSV cell. Text that starts with = + - @ would run as a formula in Excel, so it gets a ' in front.
+export const csvCell = (v, text) => {
+  let s = String(v == null ? "" : v);
+  if (text && /^[=+\-@\t\r]/.test(s)) s = "'" + s;
+  return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+};
 export const pct = (a, b) => (b > 0 ? Math.round((a / b) * 100) : 0);
 export const ordinal = (d) => d + (d % 10 === 1 && d !== 11 ? "st" : d % 10 === 2 && d !== 12 ? "nd" : d % 10 === 3 && d !== 13 ? "rd" : "th");
 export const listJoin = (a) => (a.length <= 1 ? a.join("") : a.slice(0, -1).join(", ") + " and " + a[a.length - 1]);

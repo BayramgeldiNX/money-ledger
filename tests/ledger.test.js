@@ -58,6 +58,20 @@ describe("a wallet only changes for things after its balance was set", () => {
   });
 });
 
+describe("two wallets that list the same payment method", () => {
+  const setAt = at("2026-10-01", 9);
+  const bank = { id: "bank", name: "Bank card", methods: ["Bank card", "Bank transfer"], currency: "RMB", balance: 1000, setAt };
+  const second = { id: "w2", name: "Bank transfer", methods: ["Bank transfer"], currency: "RMB", balance: 500, setAt };
+  const data = { expenses: [exp({ date: "2026-10-10", createdAt: at("2026-10-10"), rmb: 100, cat: "dining", method: "Bank transfer" })], debts: [], transfers: [], wallets: [bank, second] };
+  it("takes one expense off one wallet only, the first that lists the method", () => {
+    expect(walletBalance(bank, data, RATE)).toBe(900);
+    expect(walletBalance(second, data, RATE)).toBe(500);
+  });
+  it("still works when the wallet list is not passed", () => {
+    expect(walletBalance(second, { ...data, wallets: undefined }, RATE)).toBe(400);
+  });
+});
+
 describe("transfers, debts and dollar wallets", () => {
   const cash = { id: "cash", name: "Cash", methods: ["Cash"], currency: "RMB", balance: 0, setAt: at("2026-10-17", 9) };
   const viza = { id: "viza", name: "VIZA", methods: ["VIZA"], currency: "USD", balance: 75, setAt: at("2026-10-18", 9) };

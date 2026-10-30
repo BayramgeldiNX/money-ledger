@@ -1,4 +1,4 @@
-import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin } from "./lib/format.js";
+import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell } from "./lib/format.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
 
@@ -895,7 +895,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const cats = state.config.categories.filter((c) => c.kind !== "save");
     return '<div class="card stack lim-form" id="lim-form"><div class="head"><h2>' + (l ? "Edit limit" : "New limit") + "</h2></div>" +
       '<div class="field"><label>Which sections?</label><div class="chips" id="lf-cats">' + cats.map((c) => '<button type="button" class="chip" data-lcat="' + esc(c.id) + '" aria-pressed="' + ed.cats.includes(c.id) + '">' + tile(c, "ci") + esc(c.name) + "</button>").join("") + "</div></div>" +
-      '<div class="lf-row"><div class="field"><label for="lf-amount">Limit, ¥</label><input class="input" id="lf-amount" inputmode="decimal" placeholder="e.g. 300" value="' + (ed.amount || "") + '"></div>' +
+      '<div class="lf-row"><div class="field"><label for="lf-amount">Limit, ¥</label><input class="input" id="lf-amount" inputmode="decimal" placeholder="e.g. 300" value="' + esc(ed.amount || "") + '"></div>' +
       '<div class="field"><label>Every</label><div class="seg" id="lf-period" role="group"><button type="button" data-lp="week" aria-pressed="' + (ed.period === "week") + '">Week</button><button type="button" data-lp="month" aria-pressed="' + (ed.period !== "week") + '">Month</button></div></div></div>' +
       '<div class="field"><label for="lf-name">Name <span class="muted">(optional)</span></label><input class="input" id="lf-name" maxlength="40" placeholder="' + esc(ed.cats.length ? listJoin(ed.cats.map((id) => catById(id).name)) : "e.g. Shopping") + '" value="' + esc(ed.name || "") + '"></div>' +
       '<div class="form-msg" id="lf-msg"></div>' +
@@ -1926,7 +1926,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         const now = balanceTime($("ws-date").value);
         const bad = DEFAULT_WALLETS.find((w) => { const t = $("ws-" + w.id).value.trim(); return t && !isFinite(parseAmt(t)); });
         if (bad) { toast("Check the amount for " + bad.name + ", for example 1250.", true); return; }
-        const list = DEFAULT_WALLETS.map((w) => { const v = parseAmt($("ws-" + w.id).value); return { ...w, balance: v > 0 ? round2(v) : 0, setAt: now }; });
+        const list = DEFAULT_WALLETS.map((w) => { const v = parseAmt($("ws-" + w.id).value); return { ...w, balance: isFinite(v) ? round2(v) : 0, setAt: now }; });
         await saveWallets(list, "Wallets ready. They update as you add entries");
       };
       return;
@@ -2036,9 +2036,10 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const name = $("wa-name").value.trim(), balText = $("wa-bal").value.trim(), bal = parseAmt(balText);
       if (!name) { toast("Give the wallet a name.", true); return; }
       if (balText && !isFinite(bal)) { toast("Check the balance, for example 1250.", true); return; }
-      if (ws.some((x) => x.name.toLowerCase() === name.toLowerCase())) { toast("You already have a wallet with that name.", true); return; }
+      // the name becomes the wallet's payment method, so it must not already be one of another wallet's methods
+      if (ws.some((x) => x.name.toLowerCase() === name.toLowerCase() || x.methods.some((m) => m.toLowerCase() === name.toLowerCase()))) { toast("You already have a wallet with that name.", true); return; }
       const palette = ["#12A594", "#8B5CF6", "#E5487F", "#F07A2E", "#3E9BF0"];
-      const w = { id: "w" + uid(), name, icon: /bank|card|icbc|boc|ccb|abc|cmb/i.test(name) ? "w_bank" : "w_other", color: palette[ws.length % palette.length], methods: [name], currency: $("wa-cur").value === "USD" ? "USD" : "RMB", balance: bal > 0 ? round2(bal) : 0, setAt: Date.now() };
+      const w = { id: "w" + uid(), name, icon: /bank|card|icbc|boc|ccb|abc|cmb/i.test(name) ? "w_bank" : "w_other", color: palette[ws.length % palette.length], methods: [name], currency: $("wa-cur").value === "USD" ? "USD" : "RMB", balance: isFinite(bal) ? round2(bal) : 0, setAt: Date.now() };
       await saveWallets(ws.concat([w]), name + " added");
     };
     ["wa-name", "wa-bal"].forEach((id) => $(id).addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); $("wa-add").click(); } }));
@@ -2445,11 +2446,6 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // ---------- Monthly statement (PDF) ----------
   // Pages are built as A4-sized HTML (794 × 1123 px), drawn to images and joined into a PDF.
   // Drawing through the browser keeps Chinese text and the app fonts exactly as on screen.
-  const PDF_LIBS = ["https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js", "https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"];
-  const loadScript = (src) => new Promise((res, rej) => {
-    if (document.querySelector('script[src="' + src + '"]')) return res();
-    const s = document.createElement("script"); s.src = src; s.onload = () => res(); s.onerror = () => rej(new Error("load")); document.head.appendChild(s);
-  });
   const STMT_CSS =
     ".stmt-page{width:794px;height:1123px;box-sizing:border-box;padding:52px 56px 0;background:#fff;color:#0B0B0F;font-family:'Plus Jakarta Sans','Segoe UI',system-ui,sans-serif;font-size:12px;line-height:1.45;position:relative;font-variant-numeric:normal;letter-spacing:0;font-kerning:none}" +
     ".stmt-body{height:985px;overflow:hidden;display:flex;flex-direction:column;gap:18px}" +
@@ -2593,10 +2589,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
   // ---------- Export ----------
   function toCSV(list) {
-    const q = (v) => { const s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    // columns 2, 3, 4, 5 and 11 hold typed text (section, kind, reason, method, note)
+    const TEXT = new Set([2, 3, 4, 5, 11]);
     const head = ["Date", "Type", "Section", "Need/Want", "Reason", "Paid with / received in", "Amount", "Currency", "Rate (CNY per USD)", "RMB", "USD", "Note"];
-    const rows = list.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => [e.date, isInc(e) ? "Income" : "Expense", catById(e.cat).name, isInc(e) ? "" : KIND_LABEL[e.kind] || "", e.reason, e.method, e.amount, e.currency, e.rate, e.rmb, e.usd, e.note]);
-    return [head].concat(rows).map((r) => r.map(q).join(",")).join("\n");
+    const rows = list.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0))).map((e) => [e.date, isInc(e) ? "Income" : "Expense", catById(e.cat).name, isInc(e) ? "" : KIND_LABEL[e.kind] || "", e.reason, e.method, e.amount, e.currency, e.rate, e.rmb, e.usd, e.note]);
+    return [head].concat(rows).map((r) => r.map((v, i) => csvCell(v, TEXT.has(i))).join(",")).join("\n");
   }
   async function exportCSV(all) {
     const list = all ? state.expenses : monthList(state.month), msg = $("x-msg");
