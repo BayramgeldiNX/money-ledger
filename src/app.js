@@ -187,7 +187,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       };
       const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: "timeout" }), ms))]);
       flushOutbox = async () => {
-        if (flushing || !outbox.length) { syncState = ""; renderBanners(); return; }
+        if (flushing) return;
+        if (!outbox.length) { syncState = ""; renderBanners(); return; }
         if (navigator.onLine === false) { syncState = "offline"; renderBanners(); return; }
         flushing = true; syncState = "syncing"; renderBanners();
         try {

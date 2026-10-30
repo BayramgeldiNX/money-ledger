@@ -20,6 +20,8 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 - The owner is in China on a VPN (Clash, proxy `http://127.0.0.1:7897`). Firebase and GitHub need it; set `HTTPS_PROXY`
   for network scripts and use `node --use-env-proxy`. `npm install` worked without it.
 - Commits: use the same noreply author as the `xiezi` repo, and end with the `Co-Authored-By` line the session gives. Commit only when asked.
+- **Ask before changing anything outside this project** (VPN/Clash node or mode, Windows or other app settings). Diagnose and report, then ask.
+  Once a changed Clash node cut off the owner's Claude.
 - Token budget is tight: read only the files a task touches; don't re-run full sweeps unless asked.
 
 ## Stack and layout
@@ -28,7 +30,7 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 - `src/app.js`: the app (state, rendering, forms, reports). Still one big file, being split into `src/views/` over time.
 - `src/lib/`: `format.js` (money text, parseAmt), `dates.js`, `ledger.js` (stats + wallet math). **Pure and tested** — put new math here.
 - `src/platform.js`: stand-in for what the Artifact gave (`window.claude.use("db" | "sample" | "downloads")`).
-  - `db` → `null` for now, so data lives in `localStorage` (`ml.*` keys). Next step: Firestore with the same small API.
+  - `db` → Firestore under `users/{uid}/` when signed in (`src/sync/firebase.js`); signed out it is `null` and data lives in `localStorage` (`ml.*` keys).
   - `sample` → `null`: the Claude money review and receipt photo reading are off (needs a server + API key).
   - `downloads` → a normal file download; PDF libraries (html2canvas, jsPDF) are bundled and loaded on demand.
 - `tests/`: Vitest. `real-data.test.js` runs only if `tests/fixtures/real.json` exists.
@@ -48,6 +50,6 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 
 ## Next steps
 1. ~~Firebase~~ done in code: `src/sync/` (sign-in card in Settings, Firestore under `users/{uid}/`). Needs the owner to create the Firebase project, then `npm run setup:firebase -- <project-id>`. Test locally with `npm run emulators` + `npm run dev:emulator`. Move data over with the app's Backup → Restore.
-2. ~~Deploy~~ done. Still to do: point the Desktop shortcut and iPhone Home Screen icon at the new link once the data is moved over (Settings → Backup in the old Artifact, then Restore here).
+2. ~~Deploy and data move~~ done (2026-10-30). The owner still adds the iPhone Home Screen icon. `backup/` is gitignored and holds their data; never commit it.
 3. Split `app.js` into `src/views/*`; add Playwright screen/sync checks like xiezi.
 4. Optional: bring back the Claude review / receipt reading through a small cloud function.

@@ -6,3 +6,4 @@ dist
 tests/fixtures/
 !.env.emulator
 *-debug.log
+backup/
