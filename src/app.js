@@ -432,6 +432,24 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if ($("sheet").hidden) { $("f-date").value = t; updateMoreSummary(); }
     renderAll(); runBills();
   }
+  // Wallets and debts unfold and fold smoothly. The <details> still holds the open state, so everything that listens for its toggle keeps working.
+  function smoothDetails(root) {
+    root.addEventListener("click", (ev) => {
+      const sum = ev.target.closest("summary");
+      if (!sum || sum.parentElement.tagName !== "DETAILS" || reduceMotion()) return;
+      ev.preventDefault();
+      const d = sum.parentElement, opening = !d.open || !!d._closing, from = d.offsetHeight;
+      if (d._stop) d._stop();
+      d.style.overflow = "hidden";
+      d.open = true;
+      const to = opening ? d.offsetHeight : sum.offsetHeight + (d.offsetHeight - d.clientHeight);
+      const moves = [d.animate({ height: [from + "px", to + "px"] }, { duration: 280, easing: "cubic-bezier(.32, .72, 0, 1)" })];
+      if (opening) Array.from(d.children).filter((c) => c !== sum).forEach((c) => moves.push(c.animate({ opacity: [0, 1] }, { duration: 280, easing: "ease-out" })));
+      d._closing = !opening;
+      const timer = setTimeout(() => { d._stop(); if (!opening) d.open = false; d.style.overflow = ""; }, 300);
+      d._stop = () => { clearTimeout(timer); moves.forEach((m) => m.cancel()); d._stop = null; d._closing = false; };
+    });
+  }
   // iPhone keyboard: --kb is its height, so an open sheet can sit on top of it instead of behind it
   function watchKeyboard() {
     const vv = window.visualViewport; if (!vv) return;
@@ -2653,6 +2671,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     initStore();
     initSample();
     watchKeyboard();
+    smoothDetails($("v-wallets"));
+    smoothDetails($("v-debts"));
     fitBottomBar();
     window.addEventListener("resize", fitBottomBar);
     window.addEventListener("orientationchange", fitBottomBar);
