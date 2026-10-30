@@ -77,7 +77,8 @@ body::before { content: ""; position: fixed; top: 0; left: 0; right: 0; height: 
 .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); }
 main { padding-block: 0 110px; }
 @media (max-width: 640px) {
-  .tabs-bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 30; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
+  body { min-height: var(--screen-h, 0); }
+  .tabs-bar { position: fixed; left: 0; right: 0; bottom: calc(-1 * var(--bar-gap, 0px)); z-index: 30; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); border-top: 1px solid var(--line); padding-bottom: env(safe-area-inset-bottom, 0px); }
   .tabs { padding-block: 6px; gap: 0; padding-left: max(6px, env(safe-area-inset-left, 0px)); padding-right: max(6px, env(safe-area-inset-right, 0px)); }
   .tabs button { flex: 1 1 0; min-width: 0; min-height: 50px; flex-direction: column; gap: 2px; font-size: 11.5px; padding: 6px 4px; justify-content: center; border-radius: 12px; }
   .tabs button[aria-selected="true"] { background: transparent; color: var(--accent); }
@@ -207,7 +208,7 @@ main { padding-block: 0 110px; }
 .fab:active { transform: scale(.94); }
 .fab svg { width: 28px; height: 28px; }
 /* Phone: floats above the tab bar, so all six tabs keep the same place on every screen */
-@media (max-width: 640px) { .fab { right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(76px + env(safe-area-inset-bottom, 0px)); width: 58px; height: 58px; } }
+@media (max-width: 640px) { .fab { right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(76px + env(safe-area-inset-bottom, 0px) - var(--bar-gap, 0px)); width: 58px; height: 58px; } }
 
 /* Bottom sheet */
 .scrim { position: fixed; inset: 0; z-index: 40; background: var(--scrim); }
@@ -683,7 +684,8 @@ select.input { padding-right: 34px; background-image: url("data:image/svg+xml,%3
   /* The page stays put behind an open sheet; plain overflow: hidden does not stop iOS scrolling it */
   body.sheet-open { position: fixed; left: 0; right: 0; width: 100%; }
   /* Keyboard open: the sheet sits on top of it, and the bottom bar gets out of the way */
-  .sheet { bottom: var(--kb, 0px); }
+  .sheet { bottom: calc(var(--kb, 0px) - var(--bar-gap, 0px)); }
+  .scrim { bottom: calc(-1 * var(--bar-gap, 0px)); }
   .kb-open .tabs-bar, .kb-open .fab { display: none; }
   .top .wrap { padding-block: 8px; }
   .brand { font-size: 17px; }

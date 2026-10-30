@@ -378,6 +378,20 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (open) { lockY = window.scrollY; body.style.top = -lockY + "px"; body.classList.add("sheet-open"); }
     else { body.classList.remove("sheet-open"); body.style.top = ""; window.scrollTo(0, lockY); }
   }
+  // Home Screen app on iPhone: iOS can size the app shorter than the screen, which lifts everything fixed to the bottom.
+  // --screen-h keeps short pages (Debts) as tall as the screen; --bar-gap moves the bottom bar down by whatever gap is left.
+  function fitBottomBar() {
+    const root = document.documentElement, bar = document.querySelector(".tabs-bar");
+    const standalone = navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
+    const phone = window.innerWidth <= 640 && window.innerHeight > window.innerWidth;
+    root.style.setProperty("--bar-gap", "0px");
+    if (standalone && phone) root.style.setProperty("--screen-h", screen.height + "px"); else root.style.removeProperty("--screen-h");
+    const gap = standalone && phone && !root.classList.contains("kb-open") ? Math.round(screen.height - bar.getBoundingClientRect().bottom) : 0;
+    const applied = gap > 0 && gap <= 90 ? gap : 0;
+    root.style.setProperty("--bar-gap", applied + "px");
+    const line = $("app-screen");
+    if (line) line.textContent = "Screen " + screen.height + " · app " + window.innerHeight + " · gap " + gap + " · " + (standalone ? "home screen" : "browser");
+  }
   // iPhone keyboard: --kb is its height, so an open sheet can sit on top of it instead of behind it
   function watchKeyboard() {
     const vv = window.visualViewport; if (!vv) return;
@@ -387,6 +401,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const was = root.classList.contains("kb-open");
       root.style.setProperty("--kb", kb + "px");
       root.classList.toggle("kb-open", kb > 0);
+      fitBottomBar();
       const a = document.activeElement;
       if (kb && !was && a && a.closest && a.closest(".sheet")) setTimeout(() => a.scrollIntoView({ block: "nearest" }), 60);
     };
@@ -2557,6 +2572,10 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     initStore();
     initSample();
     watchKeyboard();
+    fitBottomBar();
+    window.addEventListener("resize", fitBottomBar);
+    window.addEventListener("orientationchange", fitBottomBar);
+    if (window.ResizeObserver) new ResizeObserver(fitBottomBar).observe(document.body);
     enableSheetSwipe("sheet", closeSheet);
     enableSheetSwipe("dsheet", closeDebtSheet);
   }
