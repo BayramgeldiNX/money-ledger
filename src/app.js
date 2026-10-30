@@ -382,6 +382,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (problem) { toast(problem, true); return; }
       saveSettings();
     }
+    const changed = state.view !== v;
     state.view = v;
     ["home", "report", "wallets", "debts", "limits", "settings"].forEach((k) => { $("v-" + k).hidden = k !== v; $("t-" + k).setAttribute("aria-selected", String(k === v)); });
     const wide = v !== "home";
@@ -396,6 +397,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     pref.set("view", v);
     renderAll();
     window.scrollTo({ top: 0 });
+    // the new screen fades in; a leftover month slide must not replay on it
+    if (changed) { const el = $("v-" + v); el.classList.remove("slide-next", "slide-prev", "view-in"); void el.offsetWidth; el.classList.add("view-in"); }
   }
 
   // ---------- Sheet (add / edit) ----------
