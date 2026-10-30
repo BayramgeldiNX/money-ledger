@@ -14,11 +14,15 @@ export async function mountAccount(el) {
   let user = null;
   try { user = await currentUser(); } catch (e) { console.error(e); }
   if (user) {
-    el.innerHTML = '<div class="head"><h2>Account</h2><span class="hint">synced</span></div>' +
+    el.innerHTML = '<div class="head"><h2>Account</h2><span class="hint">signed in</span></div>' +
       '<p class="hint" style="margin:0">Signed in as <b>' + esc(user.email) + '</b>. Your entries are saved in your account and appear on every device you sign in on.</p>' +
       '<button type="button" class="btn" id="acct-out" style="align-self:flex-start">Sign out</button><div class="form-msg" id="acct-msg"></div>';
     el.querySelector("#acct-out").onclick = async () => {
-      const b = el.querySelector("#acct-out"); b.disabled = true;
+      const b = el.querySelector("#acct-out");
+      // changes still waiting to be sent would be stranded on this device
+      let waiting = 0; try { waiting = JSON.parse(localStorage.getItem("ml.outbox") || "[]").length; } catch (e) {}
+      if (waiting && !b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Sign out anyway"; el.querySelector("#acct-msg").textContent = waiting + (waiting === 1 ? " change has" : " changes have") + " not been sent to your account yet. Go online and wait for it to finish, or tap again to sign out anyway."; return; }
+      b.disabled = true;
       try { await signOutNow(); location.reload(); } catch (e) { b.disabled = false; el.querySelector("#acct-msg").textContent = "Could not sign out. Try again."; }
     };
     return;

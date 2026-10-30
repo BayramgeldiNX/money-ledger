@@ -630,6 +630,29 @@ main { padding-block: 0 110px; }
   @keyframes pop { 0% { transform: scale(.98); } 50% { transform: scale(1.012); } 100% { transform: scale(1); } }
 }
 
+/* Opening the add form: the + turns, the page softens behind, the sheet rises on the iOS curve, its rows settle in one after another */
+@media (prefers-reduced-motion: no-preference) {
+  .fab { transition: transform .4s cubic-bezier(.34, 1.56, .64, 1); }
+  .fab svg { transition: transform .4s cubic-bezier(.32, .72, 0, 1); }
+  .fab:active { transform: scale(.88); transition-duration: .1s; }
+  body.sheet-open .fab svg { transform: rotate(135deg); }
+  .scrim { -webkit-backdrop-filter: blur(5px); backdrop-filter: blur(5px); }
+  .scrim:not([hidden]) { animation: fade .34s ease-out; }
+  #add-form > :nth-child(-n+10), #add-form > .form-actions { animation: rowIn .46s cubic-bezier(.22, .8, .24, 1) backwards; animation-delay: .08s; }
+  #add-form > :nth-child(2) { animation-delay: .11s; }
+  #add-form > :nth-child(3) { animation-delay: .14s; }
+  #add-form > :nth-child(4) { animation-delay: .17s; }
+  #add-form > :nth-child(5) { animation-delay: .2s; }
+  #add-form > :nth-child(6) { animation-delay: .23s; }
+  #add-form > :nth-child(7) { animation-delay: .26s; }
+  #add-form > :nth-child(n+8) { animation-delay: .29s; }
+  @keyframes rowIn { from { transform: translateY(14px); opacity: 0; } }
+  @media (max-width: 640px) {
+    .sheet:not([hidden]) { animation: sheetUp .46s cubic-bezier(.32, .72, 0, 1); }
+    @keyframes sheetUp { from { transform: translateY(100%); } }
+  }
+}
+
 /* Motion: calm and quick. Everything here is skipped when the phone asks for reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
   .entry.fresh { animation: freshIn .45s cubic-bezier(.2,.8,.2,1) both, freshGlow 1.8s ease-out; }

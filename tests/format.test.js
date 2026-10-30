@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseAmt, rmb0, usd0, rmb, smart, pct, ordinal, listJoin, compactRmb } from "../src/lib/format.js";
+import { parseAmt, amountInText, rmb0, usd, usd0, rmb, smart, pct, ordinal, listJoin, compactRmb } from "../src/lib/format.js";
 
 describe("parseAmt", () => {
   it("reads dot and comma decimals", () => {
@@ -18,7 +18,52 @@ describe("parseAmt", () => {
   });
 });
 
+describe("parseAmt never guesses", () => {
+  it("reads Chinese keyboard characters", () => {
+    expect(parseAmt("12，8")).toBe(12.8);
+    expect(parseAmt("12。8")).toBe(12.8);
+    expect(parseAmt("１２.５")).toBe(12.5);
+    expect(parseAmt("￥38")).toBe(38);
+    expect(parseAmt("38元")).toBe(38);
+  });
+  it("reads both ways of writing thousands", () => {
+    expect(parseAmt("1,250")).toBe(1250);
+    expect(parseAmt("12,345.60")).toBe(12345.6);
+    expect(parseAmt("1.250,50")).toBe(1250.5);
+  });
+  it("refuses text that is not a clean number", () => {
+    ["12abc", "1.2.3", "1e5", "1,2345", ".", "-"].forEach((s) => expect(parseAmt(s)).toBeNaN());
+  });
+  it("keeps negative balances and zero", () => {
+    expect(parseAmt("-50")).toBe(-50);
+    expect(parseAmt("0")).toBe(0);
+  });
+});
+
+describe("amount inside a note", () => {
+  it("does not read a thousands comma as a decimal", () => {
+    expect(amountInText("rent 1,250")).toBe(1250);
+  });
+  it("reads comma decimals", () => {
+    expect(amountInText("coffee 12,8 wechat")).toBe(12.8);
+  });
+  it("prefers the number with a currency mark", () => {
+    expect(amountInText("3 cups 午饭 38元")).toBe(38);
+    expect(amountInText("100 pages $5")).toBe(5);
+  });
+  it("takes the largest plain number, not a count", () => {
+    expect(amountInText("2 coffees 30")).toBe(30);
+  });
+  it("gives null when there is no number", () => {
+    expect(amountInText("coffee")).toBeNull();
+  });
+});
+
 describe("money text", () => {
+  it("never shows minus zero from a rounding crumb", () => {
+    expect(rmb0(0.1 + 0.2 - 0.3 - 0.0000001)).toBe("¥0");
+    expect(usd(-0.001)).toBe("$0.00");
+  });
   it("never rounds your decimals away (12.8 stays 12.80)", () => {
     expect(rmb0(12.8)).toBe("¥12.80");
     expect(rmb0(13)).toBe("¥13");

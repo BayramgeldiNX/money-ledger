@@ -1,4 +1,4 @@
-import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, pct, ordinal, listJoin } from "./lib/format.js";
+import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin } from "./lib/format.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
 
@@ -154,7 +154,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   let store = null;
   const local = {
     read(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
-    write(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {} }
+    write(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { showError("This device's storage is full, so your last change may not be kept. Download a backup and delete old entries."); } }
   };
   let outbox = local.read("ml.outbox", []), queueSeq = outbox.reduce((a, o) => Math.max(a, o.n || 0), 0);
   let flushing = false, syncState = "", retryTimer = 0;
@@ -205,7 +205,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
           syncState = navigator.onLine === false || (err && err.code === "timeout") ? "offline" : "error";
           clearTimeout(retryTimer); retryTimer = setTimeout(flushOutbox, 20000);
         }
-        flushing = false; refreshFromQueue(); renderAll();
+        flushing = false; refreshFromQueue(); renderBackground();
       };
       window.addEventListener("online", () => flushOutbox());
       window.addEventListener("offline", () => { if (outbox.length) { syncState = "offline"; renderBanners(); } });
@@ -228,23 +228,23 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       refreshFromQueue();
       db.collection("transfers").onSnapshot((snap) => {
         raw.transfers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        refreshFromQueue(); renderAll();
+        refreshFromQueue(); renderBackground();
       }, () => {});
       db.collection("debts").onSnapshot((snap) => {
         raw.debts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         state.debtsLoaded = true;
-        refreshFromQueue(); renderAll();
+        refreshFromQueue(); renderBackground();
       }, () => { state.debtsLoaded = true; });
       db.collection("expenses").onSnapshot((snap) => {
         raw.expenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         state.loaded = true;
-        refreshFromQueue(); renderAll();
+        refreshFromQueue(); renderBackground();
         runBills();
       }, (err) => { showError("Your expenses could not load (" + (err && err.code) + "). Reload the page to try again."); });
       db.doc("config/main").onSnapshot((snap) => {
         if (snap.exists) raw.config = snap.data();
         state.configLoaded = true;
-        refreshFromQueue(); renderAll(true);
+        refreshFromQueue(); renderBackground(true);
         runBills();
       }, () => { state.configLoaded = true; });
       flushOutbox();
@@ -278,7 +278,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
 
   // ---------- Stats (yuan is the main unit) ----------
-  const foodOn = (iso) => state.expenses.filter((e) => e.date === iso && isFood(e.cat)).reduce((a, e) => a + R(e), 0);
+  const foodOn = (iso) => state.expenses.filter((e) => e.date === iso && isFood(e.cat) && isSpend(e)).reduce((a, e) => a + R(e), 0);
   const totalBudget = () => state.config.categories.reduce((a, c) => a + (c.budget || 0), 0);
   function reasonsFor(items) {
     const map = {};
@@ -292,8 +292,31 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const quote = (rs, n) => rs.filter((r) => r.label !== NO_REASON).slice(0, n).map((r) => "“" + esc(r.label) + "”");
 
   // ---------- Shell ----------
+  // A change arriving by itself (sync finishing, another device) must not wipe a form you are filling in.
+  // It waits until the form is closed; anything you do yourself still redraws straight away.
+  function formOpen() {
+    if (!["wallets", "debts", "limits"].includes(state.view)) return false;
+    const v = $("v-" + state.view), a = document.activeElement;
+    if (state.limEdit || v.querySelector("[data-wform]:not([hidden]), .pay-row:not([hidden]), .debt-item textarea")) return true;
+    if (a && v.contains(a) && /^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)) return true;
+    return Array.from(v.querySelectorAll("#wa-name, #wa-bal, .wsetup input")).some((i) => i.value);
+  }
+  let bgTimer = 0, bgConfig = false;
+  function renderBackground(configChanged) {
+    bgConfig = bgConfig || !!configChanged;
+    clearTimeout(bgTimer);
+    if (formOpen()) { renderBanners(); bgTimer = setTimeout(renderBackground, 1500); return; }
+    const c = bgConfig; bgConfig = false;
+    renderAll(c);
+  }
+  // The month arrows only change what Home, Settings' downloads and the Month and Year reports show
+  function syncMonthSwitch() {
+    const on = state.view === "home" || state.view === "settings" || (state.view === "report" && (state.reportMode === "month" || state.reportMode === "year"));
+    document.querySelector(".month-switch").hidden = !on;
+  }
   function renderAll(configChanged) {
     $("m-label").textContent = monthName(state.month, { month: "short", year: "numeric" });
+    syncMonthSwitch();
     renderBanners();
     if (configChanged) renderCatChips();
     renderConvert();
@@ -324,7 +347,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
           "<strong>Offline.</strong> " + what + " saved on this device. " + (n === 1 ? "It" : "They") + " will be sent when you are back online.") +
         "</span>" + (syncState !== "syncing" ? '<button class="btn small" type="button" id="sync-now">Try now</button>' : "") + "</div>";
     }
-    if (state.mode === "local") html += '<div class="banner warn"><span class="grow">Saving on this device only.' + (window.__sync && window.__sync.available ? " Sign in under Settings to keep a safe copy and sync your devices." : "") + '</span></div>';
+    if (state.mode === "local") html += '<div class="banner warn"><span class="grow">' + (window.__sync && window.__sync.error ? "<strong>Could not open your account.</strong> What you see is not your saved data, and anything added now stays on this device. Close the app fully and open it again." : "Saving on this device only." + (window.__sync && window.__sync.available ? " Sign in under Settings to keep a safe copy and sync your devices." : "")) + "</span></div>";
     const ex = state.expenses.filter((e) => e.example).length + state.debts.filter((d) => d.example).length;
     if (ex) html += '<div class="banner"><span class="grow">These are <strong>' + ex + " example entries</strong>. Remove them when you are ready to start.</span>" + '<button class="btn small primary" type="button" id="rm-examples">Remove examples</button></div>';
     const rs = state.config.rateSetAt, days = rs ? Math.floor((Date.now() - rs) / 86400000) : 0;
@@ -353,6 +376,12 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.hidden = true), action ? 5000 : 2800);
   }
   function setView(v) {
+    // Leaving Settings keeps what you changed: Save is far down the page and easy to miss. A typing mistake keeps you here.
+    if (state.view === "settings" && v !== "settings" && state.settingsDirty) {
+      const problem = settingsProblem();
+      if (problem) { toast(problem, true); return; }
+      saveSettings();
+    }
     state.view = v;
     ["home", "report", "wallets", "debts", "limits", "settings"].forEach((k) => { $("v-" + k).hidden = k !== v; $("t-" + k).setAttribute("aria-selected", String(k === v)); });
     const wide = v !== "home";
@@ -389,8 +418,16 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const gap = standalone && phone && !root.classList.contains("kb-open") ? Math.round(screen.height - bar.getBoundingClientRect().bottom) : 0;
     const applied = gap > 0 && gap <= 90 ? gap : 0;
     root.style.setProperty("--bar-gap", applied + "px");
-    const line = $("app-screen");
-    if (line) line.textContent = "Screen " + screen.height + " · app " + window.innerHeight + " · gap " + gap + " · " + (standalone ? "home screen" : "browser");
+  }
+  // A Home Screen app can stay open for days: when the date changes, "today" and the current month must move with it
+  let lastDay = todayISO();
+  function checkNewDay() {
+    const t = todayISO(); if (t === lastDay) return;
+    const wasCurrent = state.month === lastDay.slice(0, 7);
+    lastDay = t;
+    if (wasCurrent) state.month = t.slice(0, 7);
+    if ($("sheet").hidden) { $("f-date").value = t; updateMoreSummary(); }
+    renderAll(); runBills();
   }
   // iPhone keyboard: --kb is its height, so an open sheet can sit on top of it instead of behind it
   function watchKeyboard() {
@@ -524,7 +561,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if ((e.createdAt || 0) > f.last) { f.last = e.createdAt || 0; f.e = e; }
     });
     const keys = Object.keys(map).sort((a, b) => a.length - b.length);
-    keys.forEach((k) => { const base = keys.find((b) => b !== k && b.length >= 4 && k.startsWith(b) && map[b]); if (!base || !map[k]) return; const a = map[base], f = map[k]; a.n += f.n; a.last = Math.max(a.last, f.last); delete map[k]; });
+    keys.forEach((k) => { const base = keys.find((b) => b !== k && b.length >= 4 && k.startsWith(b) && map[b]); if (!base || !map[k]) return; const a = map[base], f = map[k]; a.n += f.n; if (f.last > a.last) { a.last = f.last; a.e = f.e; } delete map[k]; });
     return Object.values(map).filter((f) => f.n >= 2).sort((a, b) => b.n - a.n || b.last - a.last).slice(0, 6).map((f) => f.e);
   }
   function renderFavs() {
@@ -593,34 +630,38 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   };
   const INC_KEYWORDS = {
     salary: ["salary", "wage", "paycheck", "payday", "工资"],
-    sidejob: ["freelance", "project", "client", "side job", "gig", "design job", "兼职"],
+    sidejob: ["freelance", "project payment", "from client", "client paid", "side job", "gig ", "design job", "兼职"],
     bonus: ["bonus", "奖金"],
     gifts_in: ["red envelope", "hongbao", "红包", "gift from", "got a gift"],
-    returns: ["dividend", "interest", "return", "利息"],
+    returns: ["dividend", "interest", "investment return", "利息"],
     refund: ["refund", "cashback", "退款"]
   };
   const METHOD_WORDS = [["WeChat Pay", ["wechat", "weixin", "微信"]], ["Alipay", ["alipay", "zhifubao", "支付宝"]], ["Cash", ["cash", "现金"]], ["Credit card", ["credit card", "credit"]], ["Bank transfer", ["transfer", "bank transfer", "转账"]], ["Bank card", ["card", "debit", "银行卡"]]];
-  function localParse(text) {
+  // English words match whole ("cash" is not in "cashew", "bus" is not in "business"); longer ones may be a stem ("grocer" in "groceries")
+  const reSafe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const wordRe = (w, whole) => (/^[\x00-\x7f]+$/.test(w) ? new RegExp("(^|[^a-z])" + reSafe(w.trim()) + (whole || w.trim().length <= 4 ? "(?:s|es)?($|[^a-z])" : ""), "i") : new RegExp(reSafe(w)));
+  const hasWord = (s, w, whole) => wordRe(w, whole).test(s);
+  function localParse(rawText) {
+    const text = normNum(rawText);
     const s = " " + text.toLowerCase() + " ";
-    const m = s.match(/(\d+(?:[.,]\d{1,2})?)/);
-    const out = { amount: m ? Number(m[1].replace(",", ".")) : null };
+    const out = { amount: amountInText(text) };
     out.currency = /\$|usd|dollar|美元|美金/.test(s) ? "USD" : "RMB";
     out.method = null;
-    for (const [name, words] of METHOD_WORDS) if (words.some((w) => s.includes(w))) { out.method = name; break; }
+    for (const [name, words] of METHOD_WORDS) if (words.some((w) => hasWord(s, w, true))) { out.method = name; break; }
     const d = new Date();
     if (/day before yesterday|前天/.test(s)) d.setDate(d.getDate() - 2);
     else if (/yesterday|昨天/.test(s)) d.setDate(d.getDate() - 1);
     out.date = isoOf(d);
-    const incHit = Object.entries(INC_KEYWORDS).find(([, ws]) => ws.some((w) => s.includes(w)));
+    const incHit = Object.entries(INC_KEYWORDS).find(([, ws]) => ws.some((w) => hasWord(s, w)));
     out.type = incHit || /\b(got paid|received|income|earned)\b|收入|收到/.test(s) ? "income" : "expense";
-    let reason = text.replace(/(\d+(?:[.,]\d{1,2})?)/g, " ").replace(/[¥$]|\b(rmb|cny|yuan|usd|dollars?|kuai|块|元)\b/gi, " ")
+    let reason = text.replace(NUM_RE(), " ").replace(/[¥$]|\b(rmb|cny|yuan|usd|dollars?|kuai)\b/gi, " ")
       .replace(/\b(day before yesterday|yesterday|today|got paid|got|received|via|with|by|paid|on|for)\b|前天|昨天|今天/gi, " ");
-    METHOD_WORDS.forEach(([, ws]) => ws.forEach((w) => { reason = reason.replace(new RegExp(w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), " "); }));
+    METHOD_WORDS.forEach(([, ws]) => ws.forEach((w) => { const re = wordRe(w, true); reason = reason.replace(new RegExp(re.source, "gi"), (m, a, b) => (a || "") + " " + (b || "")); }));
     reason = reason.replace(/\s+/g, " ").trim();
     out.reason = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : "";
     if (out.type === "income") { out.cat = incHit ? incHit[0] : "income_other"; return out; }
     // known words first (water goes to Snacks & Drinks), then your own past entries: the section you used most for those words
-    const kw = Object.entries(KEYWORDS).find(([, ws]) => ws.some((w) => s.includes(w)));
+    const kw = Object.entries(KEYWORDS).find(([, ws]) => ws.some((w) => hasWord(s, w)));
     if (kw && state.config.categories.some((c) => c.id === kw[0])) { out.cat = kw[0]; return out; }
     const words = out.reason.toLowerCase().split(/[\s,.\-]+/).filter((w) => w.length > 2);
     const score = {};
@@ -665,7 +706,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (type === "expense" && KIND_LABEL[o.kind]) setKind(o.kind, false);
     if (o.reason) $("f-reason").value = String(o.reason).slice(0, 120);
     const method = allMethods().find((mm) => mm.toLowerCase() === String(o.method || "").toLowerCase());
-    state.form.method = method || DEFAULT_METHOD; renderMethodChips();
+    state.form.method = method || state.form.method || DEFAULT_METHOD; renderMethodChips();
     const date = String(o.date || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date <= todayISO()) { $("f-date").value = date; if (date !== todayISO()) $("more").open = true; }
     updateMoreSummary(); renderConvert();
@@ -969,8 +1010,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     ev.preventDefault();
     const msg = $("f-msg");
     const amount = parseAmt($("f-amount").value);
-    if (!(amount > 0)) { msg.textContent = "Enter how much you spent."; $("f-amount").focus(); return; }
     const income = state.form.type === "income";
+    if (!(amount > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; $("f-amount").focus(); return; }
     if (!state.form.cat) { msg.textContent = income ? "Pick where the money came from." : "Pick what it was for."; return; }
     const date = $("f-date").value || todayISO();
     const existing = state.editId ? state.expenses.find((x) => x.id === state.editId) : null;
@@ -1112,7 +1153,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const sel = state.repDay && state.repDay.slice(0, 7) === key ? state.repDay : null;
     if (sel) {
       const dayAll = s.all.filter((e) => e.date === sel).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-      const out = dayAll.filter((e) => !isInc(e)), dr = out.reduce((a, e) => a + R(e), 0), du = out.reduce((a, e) => a + U(e), 0);
+      const out = dayAll.filter(isSpend), dr = out.reduce((a, e) => a + R(e), 0), du = out.reduce((a, e) => a + U(e), 0);
       const di = dayAll.filter(isInc).reduce((a, e) => a + R(e), 0), f = foodOn(sel);
       detail = '<div class="cal-detail"><div class="dh"><span class="cap">' + esc(sel === today ? "Today" : dayLabelY(sel)) + '</span><span class="hint">' + (lim > 0 ? "Food " + rmb0(f) + " of " + rmb0(lim) + (f > lim ? ' <span class="up">(over)</span>' : "") : "") + "</span></div>" +
         '<div class="dh"><b class="out-amt">' + rmb0(dr) + ' <span class="usd" style="font-size:14px">' + usd(du) + "</span></b>" + (di > 0 ? '<span class="inc-amt" style="font-weight:800">+' + rmb0(di) + " in</span>" : "") + "</div>" +
@@ -1137,7 +1178,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("list-title").textContent = sel ? "That day" : "Entries";
     const bar = $("day-bar");
     if (sel) {
-      const dl = s.all.filter((e) => e.date === sel && !isInc(e));
+      const dl = s.all.filter((e) => e.date === sel && isSpend(e));
       const di = s.incList.filter((e) => e.date === sel).reduce((a, e) => a + R(e), 0);
       const dr = dl.reduce((a, e) => a + R(e), 0), du = dl.reduce((a, e) => a + U(e), 0);
       const lim = state.config.foodLimit, f = foodOn(sel);
@@ -1157,8 +1198,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       $("filter-clear").onclick = () => { state.catFilter = null; renderHome(); };
     } else fr.hidden = true;
     const src = everywhere ? state.expenses : s.all;
-    const list = src.filter((e) => typeof e.date === "string" && (!sel || e.date === sel) && (!state.catFilter || e.cat === state.catFilter) && (!q || ((e.reason || "") + " " + (e.note || "") + " " + catById(e.cat).name + " " + (e.method || "")).toLowerCase().includes(q)))
-      .sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0))).slice(0, 400);
+    const found = src.filter((e) => typeof e.date === "string" && (!sel || e.date === sel) && (!state.catFilter || e.cat === state.catFilter) && (!q || ((e.reason || "") + " " + (e.note || "") + " " + catById(e.cat).name + " " + (e.method || "")).toLowerCase().includes(q)));
+    const list = found.slice().sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0))).slice(0, 400);
     const box = $("month-list");
     if (!state.loaded) { box.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
     if (!list.length) {
@@ -1169,12 +1210,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     }
     let html = "", day = null, group = [];
     if (q || state.catFilter) {
-      const tr = list.filter((e) => !isInc(e)).reduce((a, e) => a + R(e), 0), ti = list.filter(isInc).reduce((a, e) => a + R(e), 0);
-      html += '<div class="day-head" style="padding-top:2px"><span>' + list.length + " result" + (list.length === 1 ? "" : "s") + (everywhere ? " in all months" : " in " + esc(monthName(state.month, { month: "long" }))) + '</span><span class="t">' + (tr ? "<b>" + rmb0(tr) + "</b>" : "") + (ti ? (tr ? " · " : "") + '<b class="inc-amt">+' + rmb0(ti) + "</b>" : "") + "</span></div>";
+      // totals and the count cover everything found, even when the list below stops at 400
+      const tr = found.filter(isSpend).reduce((a, e) => a + R(e), 0), ti = found.filter(isInc).reduce((a, e) => a + R(e), 0);
+      html += '<div class="day-head" style="padding-top:2px"><span>' + found.length + " result" + (found.length === 1 ? "" : "s") + (found.length > list.length ? ", newest " + list.length + " shown" : "") + (everywhere ? " in all months" : " in " + esc(monthName(state.month, { month: "long" }))) + '</span><span class="t">' + (tr ? "<b>" + rmb0(tr) + "</b>" : "") + (ti ? (tr ? " · " : "") + '<b class="inc-amt">+' + rmb0(ti) + "</b>" : "") + "</span></div>";
     }
     const flush = () => {
       if (!group.length) return;
-      const out = group.filter((e) => !isInc(e)), inn = group.filter(isInc);
+      const out = group.filter(isSpend), inn = group.filter(isInc);
       const dr = out.reduce((a, e) => a + R(e), 0), du = out.reduce((a, e) => a + U(e), 0), di = inn.reduce((a, e) => a + R(e), 0);
       html += '<div class="day-head"><span>' + esc(day === todayISO() ? "Today" : dayLabelY(day)) + '</span><span class="t">' + (out.length ? '<b class="out-amt">' + rmb0(dr) + "</b> · " + usd(du) : "") + (di > 0 ? (out.length ? " · " : "") + '<b class="inc-amt">+' + rmb0(di) + "</b> in" : "") + "</span></div>" + group.map(entryHTML).join("");
       group = [];
@@ -1266,7 +1308,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
 
   function bindMode(el) {
-    el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { state.reportMode = b.dataset.mode; pref.set("reportMode", b.dataset.mode); renderReport(); }));
+    el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { state.reportMode = b.dataset.mode; pref.set("reportMode", b.dataset.mode); syncMonthSwitch(); renderReport(); }));
     el.querySelectorAll("[data-goto-month]").forEach((b) => (b.onclick = () => { state.month = b.dataset.gotoMonth; state.reportMode = "month"; renderAll(); window.scrollTo({ top: 0 }); }));
     el.querySelectorAll(".cal .day[data-d]").forEach((b) => (b.onclick = () => { state.repDay = state.repDay === b.dataset.d ? null : b.dataset.d; renderReport(); }));
     el.querySelectorAll("[data-see-cat]").forEach((b) => (b.onclick = () => { state.catFilter = b.dataset.seeCat; state.homeView = "list"; state.selDay = null; setView("home"); }));
@@ -1802,6 +1844,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       $("ws-date").value = todayISO(); $("ws-date").max = todayISO();
       $("ws-start").onclick = async () => {
         const now = balanceTime($("ws-date").value);
+        const bad = DEFAULT_WALLETS.find((w) => { const t = $("ws-" + w.id).value.trim(); return t && !isFinite(parseAmt(t)); });
+        if (bad) { toast("Check the amount for " + bad.name + ", for example 1250.", true); return; }
         const list = DEFAULT_WALLETS.map((w) => { const v = parseAmt($("ws-" + w.id).value); return { ...w, balance: v > 0 ? round2(v) : 0, setAt: now }; });
         await saveWallets(list, "Wallets ready. They update as you add entries");
       };
@@ -1909,8 +1953,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       };
     });
     $("wa-add").onclick = async () => {
-      const name = $("wa-name").value.trim(), bal = parseAmt($("wa-bal").value);
+      const name = $("wa-name").value.trim(), balText = $("wa-bal").value.trim(), bal = parseAmt(balText);
       if (!name) { toast("Give the wallet a name.", true); return; }
+      if (balText && !isFinite(bal)) { toast("Check the balance, for example 1250.", true); return; }
       if (ws.some((x) => x.name.toLowerCase() === name.toLowerCase())) { toast("You already have a wallet with that name.", true); return; }
       const palette = ["#12A594", "#8B5CF6", "#E5487F", "#F07A2E", "#3E9BF0"];
       const w = { id: "w" + uid(), name, icon: /bank|card|icbc|boc|ccb|abc|cmb/i.test(name) ? "w_bank" : "w_other", color: palette[ws.length % palette.length], methods: [name], currency: $("wa-cur").value === "USD" ? "USD" : "RMB", balance: bal > 0 ? round2(bal) : 0, setAt: Date.now() };
@@ -1963,7 +2008,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   async function restoreBackup(data, replace) {
     const prog = $("bk-prog"), btns = $("bk-panel").querySelectorAll("button");
     btns.forEach((b) => (b.disabled = true));
-    const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "id"));
+    const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "id" && k !== "_pending"));
     let done = 0;
     try {
       if (replace) {
@@ -2231,8 +2276,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("s-lim-hint").textContent = lc ? lc + (lc === 1 ? " limit: " : " limits: ") + state.config.limits.map((l) => limName(l) + " " + rmb0(l.amount) + " a " + limWord(l)).join(", ") + ". Add, change or delete them on the Limits screen." : "Set limits for any section, per week or per month, on the Limits screen.";
     $("s-go-limits").onclick = () => setView("limits");
     $("s-food-hint").textContent = "Counts " + listJoin(state.config.foodCats.map((id) => catById(id).name)) + ". Starts fresh every day.";
-    $("s-rate").value = state.config.rate.toFixed(2);
-    draftCats = state.config.categories.map((c) => ({ ...c }));
+    // show the rate in full: 6.7123 shown as 6.71 would be saved back as 6.71 the next time anything here is saved
+    $("s-rate").value = state.config.rate.toFixed(4).replace(/0{1,2}$/, "");
+    draftCats =state.config.categories.map((c) => ({ ...c }));
     draftIncs = state.config.incomeCats.map((c) => ({ id: c.id, name: c.name, color: c.color }));
     drawCatRows();
     drawIncRows();
@@ -2289,10 +2335,20 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function readIncRows() {
     draftIncs.forEach((c, i) => { const n = $("si-name-" + i); if (!n) return; c.name = n.value.trim() || "Income"; c.color = $("si-color-" + i).value; });
   }
+  // what is wrong with what was typed in Settings, or "" if it can be saved
+  function settingsProblem() {
+    const rate = parseAmt($("s-rate").value);
+    if (!(rate > 0 && rate < 100)) return "Enter the rate as yuan per dollar, for example 6.70.";
+    const foodText = $("s-food").value.trim();
+    if (foodText && !(parseAmt(foodText) >= 0)) return "Check the daily food limit. Use a number, or 0 to turn it off.";
+    const badBudget = (draftCats || []).find((c, i) => { const el = $("sc-bud-" + i), t = el ? el.value.trim() : ""; return t && !(parseAmt(t) >= 0); });
+    return badBudget ? "Check the budget for " + badBudget.name + ". Use a number, or 0 for none." : "";
+  }
   async function saveSettings() {
+    const problem = settingsProblem();
+    if (problem) { $("s-msg").textContent = problem; return; }
     readCatRows(); readIncRows();
     const rate = parseAmt($("s-rate").value);
-    if (!(rate > 0 && rate < 100)) { $("s-msg").textContent = "Enter the rate as yuan per dollar, for example 6.70."; return; }
     const food = parseAmt($("s-food").value);
     const newRate = Math.round(rate * 10000) / 10000;
     const cfg = { ...state.config, rate: newRate, rateSetAt: newRate !== state.config.rate || !state.config.rateSetAt ? Date.now() : state.config.rateSetAt,
@@ -2458,7 +2514,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const q = (v) => { const s = String(v == null ? "" : v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
     const head = ["Date", "Type", "Section", "Need/Want", "Reason", "Paid with / received in", "Amount", "Currency", "Rate (CNY per USD)", "RMB", "USD", "Note"];
     const rows = list.slice().sort((a, b) => (a.date < b.date ? -1 : 1)).map((e) => [e.date, isInc(e) ? "Income" : "Expense", catById(e.cat).name, isInc(e) ? "" : KIND_LABEL[e.kind] || "", e.reason, e.method, e.amount, e.currency, e.rate, e.rmb, e.usd, e.note]);
-    return "﻿" + [head].concat(rows).map((r) => r.map(q).join(",")).join("\n");
+    return [head].concat(rows).map((r) => r.map(q).join(",")).join("\n");
   }
   async function exportCSV(all) {
     const list = all ? state.expenses : monthList(state.month), msg = $("x-msg");
@@ -2576,6 +2632,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     window.addEventListener("resize", fitBottomBar);
     window.addEventListener("orientationchange", fitBottomBar);
     if (window.ResizeObserver) new ResizeObserver(fitBottomBar).observe(document.body);
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) { checkNewDay(); return; }
+      // the app is being closed or switched away from: do not lose Settings changes
+      if (state.view === "settings" && state.settingsDirty && !settingsProblem()) saveSettings();
+    });
+    window.addEventListener("focus", checkNewDay);
+    window.addEventListener("pageshow", checkNewDay);
+    setInterval(checkNewDay, 60000);
     enableSheetSwipe("sheet", closeSheet);
     enableSheetSwipe("dsheet", closeDebtSheet);
   }

@@ -9,8 +9,9 @@ export default defineConfig(({ command }) => ({
   // Shown in Settings so you can see which version a device runs.
   define: { __BUILD__: JSON.stringify(new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC") },
   build: { target: "es2020", chunkSizeWarningLimit: 1200 },
-  // Worktrees share node_modules from the main checkout, outside the project folder; without this the dev server blocks the fonts.
-  server: { fs: { strict: false } },
+  // Worktrees share node_modules from the main checkout, outside the project folder. Allow only the font files from there:
+  // "npm run dev" is reachable on the local network, so the rest of the disk (and backup/) must stay blocked.
+  server: { fs: { allow: [".", "../../../node_modules/@fontsource"] } },
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
