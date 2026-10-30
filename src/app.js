@@ -1,6 +1,6 @@
 import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin } from "./lib/format.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays } from "./lib/dates.js";
-import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
+import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
 
 (function () {
   "use strict";
@@ -416,11 +416,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const root = document.documentElement, bar = document.querySelector(".tabs-bar");
     const standalone = navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
     const phone = window.innerWidth <= 640 && window.innerHeight > window.innerWidth;
-    root.style.setProperty("--bar-gap", "0px");
-    if (standalone && phone) root.style.setProperty("--screen-h", screen.height + "px"); else root.style.removeProperty("--screen-h");
-    const gap = standalone && phone && !root.classList.contains("kb-open") ? Math.round(screen.height - bar.getBoundingClientRect().bottom) : 0;
+    // this runs on every frame while the page height changes, so it only writes when something really changed: a write restyles the whole page
+    const screenH = standalone && phone ? screen.height + "px" : "";
+    if (root.style.getPropertyValue("--screen-h") !== screenH) { if (screenH) root.style.setProperty("--screen-h", screenH); else root.style.removeProperty("--screen-h"); }
+    const current = parseFloat(root.style.getPropertyValue("--bar-gap")) || 0;
+    const gap = standalone && phone && !root.classList.contains("kb-open") ? Math.round(screen.height - bar.getBoundingClientRect().bottom + current) : 0;
     const applied = gap > 0 && gap <= 90 ? gap : 0;
-    root.style.setProperty("--bar-gap", applied + "px");
+    if (applied !== current) root.style.setProperty("--bar-gap", applied + "px");
   }
   // A Home Screen app can stay open for days: when the date changes, "today" and the current month must move with it
   let lastDay = todayISO();
@@ -439,12 +441,15 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (!sum || sum.parentElement.tagName !== "DETAILS" || reduceMotion()) return;
       ev.preventDefault();
       const d = sum.parentElement, opening = !d.open || !!d._closing, from = d.offsetHeight;
+      // a tap mid-way carries on from where things are now, so the content never blinks
+      const inner = Array.from(d.children).filter((c) => c !== sum), fadeFrom = inner.map((c) => (d.open ? Number(getComputedStyle(c).opacity) : 0));
       if (d._stop) d._stop();
       d.style.overflow = "hidden";
       d.open = true;
       const to = opening ? d.offsetHeight : sum.offsetHeight + (d.offsetHeight - d.clientHeight);
-      const moves = [d.animate({ height: [from + "px", to + "px"] }, { duration: 280, easing: "cubic-bezier(.32, .72, 0, 1)" })];
-      if (opening) Array.from(d.children).filter((c) => c !== sum).forEach((c) => moves.push(c.animate({ opacity: [0, 1] }, { duration: 280, easing: "ease-out" })));
+      // "forwards" holds the end state until the timer below tidies up; without it the row snaps back open for a moment
+      const moves = [d.animate({ height: [from + "px", to + "px"] }, { duration: 280, easing: "cubic-bezier(.32, .72, 0, 1)", fill: "forwards" })]
+        .concat(inner.map((c, i) => c.animate({ opacity: [fadeFrom[i], opening ? 1 : 0] }, { duration: 280, easing: "ease-out", fill: "forwards" })));
       d._closing = !opening;
       const timer = setTimeout(() => { d._stop(); if (!opening) d.open = false; d.style.overflow = ""; }, 300);
       d._stop = () => { clearTimeout(timer); moves.forEach((m) => m.cancel()); d._stop = null; d._closing = false; };
@@ -1899,7 +1904,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const wToRmb = (w, n) => wToRmbOf(w, n, state.config.rate);
   const inWalletCur = (w, d, amt) => inWalletCurOf(w, d, amt, state.config.rate);
   const walletMoves = (w) => walletMovesOf(w, { expenses: state.expenses, debts: state.debts, transfers: state.transfers, wallets: state.config.wallets || [] }, state.config.rate, (id) => catById(id).name);
-  const walletBalance = (w) => round2(w.balance + walletMoves(w).reduce((a, m) => a + m.amt, 0));
+  // what a wallet holds today: something dated in the future has not happened yet, so it counts from its own date
+  const walletBalance = (w) => { const b = walletBalanceOn(w, { expenses: state.expenses, debts: state.debts, transfers: state.transfers, wallets: state.config.wallets || [] }, state.config.rate, todayISO()); return b == null ? w.balance : b; };
   async function saveWallets(wallets, msg) {
     try { await store.saveConfig({ ...state.config, wallets }); state.config = normalizeConfig({ ...state.config, wallets }); if (msg) toast(msg); renderAll(true); return true; }
     catch (e) { toast("Could not save. Try again.", true); return false; }
