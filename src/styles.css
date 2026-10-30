@@ -56,7 +56,7 @@ button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
 .wide { max-width: 1080px; }
 
 /* Header */
-.top { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20; background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+.top { padding-top: env(safe-area-inset-top, 0px); }
 .top .wrap { display: flex; align-items: center; gap: 12px; padding-block: 12px; }
 .brand { margin-right: auto; font-size: 18px; font-weight: 800; letter-spacing: -0.03em; display: flex; align-items: center; gap: 10px; }
 /* Logo: same mark as the home-screen icon (fixed colors, it reads on light and dark) */
@@ -340,6 +340,8 @@ main { padding-block: 0 110px; }
 .debt-actions .btn.primary { background: var(--ink); color: var(--surface); }
 @media (max-width: 520px) {
   .debt-item { margin-left: 0; }
+  .wform #wa-name { flex: 1 1 100%; }
+  .wform #wa-bal { flex: 1 1 0; min-width: 0; }
   .debt-actions { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); }
   .debt-actions .btn { width: 100%; padding: 6px 4px; grid-column: span 2; }
   .debt-actions [data-act="pay"], .debt-actions [data-act="settle"] { grid-column: span 3; min-height: 44px; font-size: 14px; }
@@ -362,6 +364,7 @@ main { padding-block: 0 110px; }
 .wallet .wsub { font-size: 12.5px; color: var(--muted); font-weight: 600; }
 .wallet .wbal { font-weight: 800; font-size: 17px; text-align: right; }
 .wallet-body { margin: 0 0 12px 56px; padding: 12px 14px; background: var(--surface-2); border-radius: 16px; display: flex; flex-direction: column; gap: 10px; }
+@media (max-width: 520px) { .wallet-body { margin-left: 0; } }
 .wmove { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; padding: 3px 0; }
 .wmove .l { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .wmove .d { color: var(--muted); font-size: 12px; margin-right: 6px; }
