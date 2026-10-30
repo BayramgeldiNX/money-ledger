@@ -1230,8 +1230,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     return '<div class="card stack" style="gap:10px"><div class="head"><h2>Calendar</h2><span class="hint">tap a day · darker = more spent</span></div><div class="cal">' + cells + "</div>" +
       (keys ? '<div class="cal-foot"><span style="display:flex;gap:12px;flex-wrap:wrap">' + keys + "</span></div>" : "") + detail + "</div>";
   }
+  // A picked date and a search are one or the other: a search always looks through the whole month (or All months), never one hidden day
+  function closeSearch() { $("search-row").hidden = true; $("search-btn").setAttribute("aria-pressed", "false"); $("flt-q").value = ""; }
+  function clearDay() { state.selDay = null; $("jump").value = ""; }
   function goToDate(v) {
+    // the picker's Reset button sends an empty date: back to the whole month
+    if (!v) { state.selDay = null; renderHome(); return; }
     if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+    closeSearch();
     state.month = v.slice(0, 7); state.selDay = v; state.catFilter = null;
     if (state.view !== "home") setView("home"); else renderAll();
     $("day-bar").scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -1253,7 +1259,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       bar.innerHTML = '<div><div class="when">' + esc(sel === todayISO() ? "Today" : dayLabel(sel)) + (lim > 0 && dl.length ? " · food " + rmb0(f) + " of " + rmb0(lim) : "") + '</div><div class="tot"><span class="out-amt">' + rmb0(dr) + '</span><small class="usd">' + usd(du) + "</small>" + (di > 0 ? '<small class="inc-amt">+' + rmb0(di) + " in</small>" : "") + "</div></div>" +
         '<button type="button" class="btn small" id="day-clear">Whole month</button>';
       bar.hidden = false;
-      $("day-clear").onclick = () => { state.selDay = null; renderHome(); };
+      $("day-clear").onclick = () => { clearDay(); renderHome(); };
     } else bar.hidden = true;
 
     const q = $("search-row").hidden ? "" : $("flt-q").value.trim().toLowerCase();
@@ -1272,7 +1278,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (!state.loaded) { box.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
     if (!list.length) {
       box.innerHTML = sel && !q && !state.catFilter ? '<div class="empty-state"><h3>Nothing spent on this day</h3>A day with no spending. Nice.</div>'
-        : s.count || everywhere ? '<div class="empty-state"><h3>No matches</h3>' + (everywhere ? "Nothing found in any month." : 'Nothing this month. Try "All months".') + "</div>"
+        : q || state.catFilter || s.count || everywhere ? '<div class="empty-state"><h3>No matches</h3>' + (everywhere ? "Nothing found in any month." : 'Nothing this month. Try "All months".') + "</div>"
         : '<div class="empty-state"><h3>Nothing here yet</h3>Tap the + button to add your first expense for ' + esc(monthName(state.month, { month: "long" })) + ".</div>";
       return;
     }
@@ -2649,9 +2655,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     j.addEventListener("click", (ev) => { try { j.showPicker(); ev.preventDefault(); } catch (e) {} });
     j.addEventListener("change", () => goToDate(j.value));
     $("search-btn").onclick = () => {
-      const row = $("search-row"), show = row.hidden;
-      row.hidden = !show; $("search-btn").setAttribute("aria-pressed", String(show));
-      if (show) $("flt-q").focus(); else { $("flt-q").value = ""; renderHome(); }
+      if ($("search-row").hidden) {
+        $("search-row").hidden = false; $("search-btn").setAttribute("aria-pressed", "true");
+        clearDay(); renderHome();
+        $("flt-q").focus();
+      } else { closeSearch(); renderHome(); }
     };
     $("flt-q").addEventListener("input", renderHome);
     $("search-all").onclick = () => { state.searchAll = !state.searchAll; $("search-all").setAttribute("aria-pressed", String(state.searchAll)); renderHome(); };
