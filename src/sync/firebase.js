@@ -50,6 +50,12 @@ export async function currentUser() {
 export async function signIn(email, password) { const { auth, A } = await load(); await A.signInWithEmailAndPassword(auth, email, password); }
 export async function signUp(email, password) { const { auth, A } = await load(); await A.createUserWithEmailAndPassword(auth, email, password); }
 export async function signOutNow() { const { auth, A } = await load(); await A.signOut(auth); }
+// Checks the password of the signed-in user without changing who is signed in.
+export async function verifyPassword(password) {
+  const { auth, A } = await load();
+  const user = auth.currentUser;
+  await A.reauthenticateWithCredential(user, A.EmailAuthProvider.credential(user.email, password));
+}
 
 // Plain-English reason for a sign-in problem.
 export function authMessage(e) {
