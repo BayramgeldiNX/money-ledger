@@ -795,12 +795,24 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const cats = state.form.type === "income" ? state.config.incomeCats : state.config.categories;
     box.innerHTML = cats.map((c) =>
       '<button type="button" class="chip" data-cat="' + esc(c.id) + '" aria-pressed="' + (state.form.cat === c.id) + '">' + tile(c, "ci") + esc(c.name) + "</button>").join("");
-    box.querySelectorAll(".chip").forEach((b) => (b.onclick = () => pickCat(b.dataset.cat)));
+    box.querySelectorAll(".chip").forEach((b) => (b.onclick = () => { pickCat(b.dataset.cat); softly(b, "chip-picked"); }));
   }
+  // plays a one-time effect on a tap; it is removed afterwards so it does not replay when the form opens again
+  const softly = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); el.addEventListener("animationend", () => el.classList.remove(cls), { once: true }); };
   function renderMethodChips() {
     const box = $("f-method");
     box.innerHTML = allMethods().map((m) => '<button type="button" class="chip plain" data-m="' + esc(m) + '" aria-pressed="' + (state.form.method === m) + '">' + esc(m) + "</button>").join("");
-    box.querySelectorAll(".chip").forEach((b) => (b.onclick = () => { state.form.method = b.dataset.m; renderMethodChips(); }));
+    box.querySelectorAll(".chip").forEach((b) => (b.onclick = () => {
+      state.form.method = b.dataset.m;
+      // same buttons, so the colours can ease across instead of jumping
+      box.querySelectorAll(".chip").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+      renderMethodHint();
+      softly(b, "chip-picked"); softly($("f-method-hint"), "hint-in");
+    }));
+    renderMethodHint();
+  }
+  function renderMethodHint() {
+    const box = $("f-method");
     // say which wallet this changes, or warn that it changes none
     let hint = $("f-method-hint");
     if (!hint) { hint = document.createElement("span"); hint.id = "f-method-hint"; hint.className = "hint"; box.after(hint); }

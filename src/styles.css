@@ -657,6 +657,18 @@ main { padding-block: 0 110px; }
     .sheet:not([hidden]) { animation: sheetUp .46s cubic-bezier(.32, .72, 0, 1); }
     @keyframes sheetUp { from { transform: translateY(100%); } }
   }
+  /* Add form: choosing What for or Paid with eases across, with one slow soft ring from the chip you tapped */
+  #f-cats .chip, #f-method .chip { transition: background .38s ease, color .38s ease, transform .2s ease; }
+  #f-cats .chip .ci { transition: background .38s ease, color .38s ease; }
+  .chip-picked { animation: chipPick .62s cubic-bezier(.22, .8, .24, 1); }
+  .hint-in { animation: hintIn .42s ease-out; }
+  .sheet-ghost .chip-picked, .sheet-ghost .hint-in { animation: none; }
+  @keyframes chipPick {
+    0% { transform: scale(.97); box-shadow: 0 0 0 0 color-mix(in srgb, var(--ink) 22%, transparent); }
+    55% { transform: scale(1.012); }
+    100% { transform: scale(1); box-shadow: 0 0 0 9px transparent; }
+  }
+  @keyframes hintIn { from { opacity: 0; } }
   /* Switching tabs: a very quick fade, so screens never just jump */
   .view-in, .fab:not([hidden]) { animation: fade .16s ease-out; }
   /* Closing: quicker than opening, and the form leaves as one piece */
