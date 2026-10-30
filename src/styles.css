@@ -515,11 +515,24 @@ main { padding-block: 0 110px; }
 .form-msg { font-size: 14px; color: var(--bad); font-weight: 700; }
 .form-msg:empty { display: none; }
 .lock-screen { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
-.lock-box { width: 100%; max-width: 320px; align-items: stretch; text-align: center; }
-.lock-box h2 { font-size: 20px; }
+.lock-box { width: 100%; max-width: 320px; display: flex; flex-direction: column; gap: 12px; text-align: center; }
 .lock-box .btn { min-height: 48px; }
-.lock-icon { align-self: center; color: var(--ink); }
 .lock-link { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; min-height: 44px; }
+.pin { display: flex; flex-direction: column; align-items: center; gap: 18px; }
+.pin-title { font-size: 17px; font-weight: 600; }
+.pin-dots { display: flex; gap: 16px; }
+.pin-dots span { width: 12px; height: 12px; border-radius: 999px; border: 1.5px solid var(--ink); }
+.pin-dots span.on { background: var(--ink); }
+.pin-msg { min-height: 20px; font-size: 13px; font-weight: 600; color: var(--bad); text-align: center; }
+.pin-keys { display: grid; grid-template-columns: repeat(3, 76px); gap: 14px 22px; }
+.pin-key { width: 76px; height: 76px; border: 0; border-radius: 999px; background: var(--surface); color: var(--ink); font: inherit; font-size: 28px; font-weight: 500; display: grid; place-items: center; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.pin-key:active { background: var(--surface-2); }
+.pin-key.plain { background: transparent; }
+.pin-key.small { font-size: 14px; color: var(--muted); }
+@media (prefers-reduced-motion: no-preference) {
+  .pin-dots.shake { animation: pin-shake .35s; }
+  @keyframes pin-shake { 25% { transform: translateX(-8px); } 50% { transform: translateX(8px); } 75% { transform: translateX(-4px); } }
+}
 .link-btn { border: 0; background: transparent; color: var(--accent); font-weight: 700; font-size: 13.5px; padding: 4px 0; align-self: flex-start; }
 
 /* Report */

@@ -1,15 +1,24 @@
 // Face ID lock for the iPhone app. It uses a passkey only as a way to ask iOS for Face ID, so it is a
 // lock screen on this device: it does not encrypt anything, and the data stays protected by the sign-in.
-// Turning it on needs a signed-in account, because the account password is the way back in if Face ID fails.
-import { isIOS, shouldRelock, toB64, fromB64 } from "./lib/lock.js";
+// A 6-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
+// passcode, which is why turning the lock on needs a signed-in account.
+import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
 
-const KEY = "ml.lock.cred";
+const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails";
+const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } };
+const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* stays off */ } };
 const savedCred = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
 const saveCred = (id) => { try { localStorage.setItem(KEY, id); } catch (e) { /* stays off */ } };
-const clearCred = () => { try { localStorage.removeItem(KEY); } catch (e) { /* nothing saved */ } };
+const clearLock = () => { try { [KEY, PASS_KEY, FAILS_KEY].forEach((k) => localStorage.removeItem(k)); } catch (e) { /* nothing saved */ } };
 
 const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
+
+const FACE_ICON = '<svg viewBox="0 0 48 48" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M6 16V10a4 4 0 0 1 4-4h6M32 6h6a4 4 0 0 1 4 4v6M42 32v6a4 4 0 0 1-4 4h-6M16 42h-6a4 4 0 0 1-4-4v-6"/>' +
+  '<path d="M17 19v3M31 19v3M24 19v8h-2M18 33c3.500 2.500 8.500 2.500 12 0"/></svg>';
+const DELETE_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7z"/><path d="M12 10l4 4M16 10l-4 4"/></svg>';
 
 async function faceIdAvailable() {
   if (!isIOS(navigator) || !window.PublicKeyCredential) return false;
@@ -40,74 +49,152 @@ async function askFaceId() {
   return toB64(cred.rawId) === savedCred();
 }
 
+// Checks the passcode, counting wrong tries. Returns "" when it is right, or what to tell the owner.
+async function tryPasscode(pin) {
+  const fails = read(FAILS_KEY) || { n: 0, at: 0 };
+  const left = fails.at + waitAfterFails(fails.n) - Date.now();
+  if (left > 0) return "Too many tries. Wait " + Math.ceil(left / 1000) + " seconds.";
+  if (await checkPassword(pin, read(PASS_KEY))) { write(FAILS_KEY, { n: 0, at: 0 }); return ""; }
+  write(FAILS_KEY, { n: fails.n + 1, at: Date.now() });
+  return "Wrong passcode.";
+}
+
+// ---- The number pad: title, dots, and 0-9. onPin gets the digits when all of them are in. ----
+function makePad(host, { title, left, onPin }) {
+  let digits = "", busy = false;
+  const key = (d) => '<button type="button" class="pin-key" data-d="' + d + '">' + d + '</button>';
+  host.innerHTML = '<h2 class="pin-title"></h2><div class="pin-dots" aria-hidden="true">' + '<span></span>'.repeat(PIN_LENGTH) + '</div>' +
+    '<div class="pin-msg" role="status"></div><div class="pin-keys">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key).join("") +
+    left + key(0) + '<button type="button" class="pin-key plain" data-del aria-label="Delete">' + DELETE_ICON + '</button></div>';
+  const dots = [...host.querySelectorAll(".pin-dots span")], msg = host.querySelector(".pin-msg"), head = host.querySelector(".pin-title");
+  const paint = () => dots.forEach((s, i) => s.classList.toggle("on", i < digits.length));
+  const pad = {
+    title: (text) => { head.textContent = text; },
+    say: (text) => { msg.textContent = text; },
+    reset: () => { digits = ""; busy = false; paint(); },
+    shake: () => { const row = host.querySelector(".pin-dots"); row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake"); },
+  };
+  pad.title(title);
+  host.querySelector(".pin-keys").addEventListener("click", (ev) => {
+    const b = ev.target.closest("button");
+    if (!b || busy) return;
+    if (b.hasAttribute("data-del")) { digits = digits.slice(0, -1); paint(); return; }
+    if (!b.dataset.d || digits.length >= PIN_LENGTH) return;
+    digits += b.dataset.d;
+    msg.textContent = "";
+    paint();
+    if (digits.length === PIN_LENGTH) { busy = true; onPin(digits); }
+  });
+  return pad;
+}
+
+// A full screen with a pad on it, for Settings. Returns the pad; close() takes the screen away.
+function padScreen(opts) {
+  const screen = document.createElement("div");
+  screen.className = "lock-screen";
+  screen.setAttribute("role", "dialog");
+  screen.innerHTML = '<div class="pin"></div>';
+  document.body.appendChild(screen);
+  const close = () => screen.remove();
+  const pad = makePad(screen.querySelector(".pin"), { ...opts, left: '<button type="button" class="pin-key plain small" data-cancel>Cancel</button>', onPin: (pin) => opts.onPin(pin, pad, close) });
+  screen.querySelector("[data-cancel]").onclick = () => { close(); if (opts.onCancel) opts.onCancel(); };
+  return pad;
+}
+
 // ---- Lock screen ----
-let cover = null, locked = false, asking = false, hiddenAt = 0, card = null;
+let cover = null, pad = null, locked = false, asking = false, hiddenAt = 0, card = null;
+
+function showAccountForm() {
+  cover.querySelector(".pin").hidden = true;
+  cover.querySelector("#lock-go-big").hidden = true;
+  cover.querySelector("#lock-forgot").hidden = true;
+  cover.querySelector("#lock-form").hidden = false;
+  cover.querySelector("#lock-pass").focus();
+}
+// Turned on before the passcode existed: Face ID or the account password only.
+function showUnlockChoices() {
+  const hasPin = !!read(PASS_KEY);
+  cover.querySelector(".pin").hidden = !hasPin;
+  cover.querySelector("#lock-go-big").hidden = hasPin;
+  cover.querySelector("#lock-forgot").hidden = false;
+  cover.querySelector("#lock-forgot").textContent = hasPin ? "Forgot passcode?" : "Use account password";
+  cover.querySelector("#lock-form").hidden = true;
+  cover.querySelector("#lock-msg").textContent = "";
+  cover.querySelector("#lock-pass").value = "";
+  pad.say("");
+  pad.reset();
+}
 
 function buildCover() {
   cover = document.createElement("div");
   cover.className = "lock-screen";
   cover.setAttribute("role", "dialog");
   cover.setAttribute("aria-label", "Money Ledger is locked");
-  cover.innerHTML = '<div class="lock-box stack">' +
-    '<svg class="lock-icon" viewBox="0 0 48 48" width="56" height="56" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-    '<path d="M6 16V10a4 4 0 0 1 4-4h6M32 6h6a4 4 0 0 1 4 4v6M42 32v6a4 4 0 0 1-4 4h-6M16 42h-6a4 4 0 0 1-4-4v-6"/>' +
-    '<path d="M17 19v3M31 19v3M24 19v8h-2M18 33c3.500 2.500 8.500 2.500 12 0"/></svg>' +
-    '<h2>Money Ledger</h2>' +
-    '<button type="button" class="btn primary" id="lock-go">Unlock with Face ID</button>' +
-    '<div class="form-msg" id="lock-msg" role="status"></div>' +
-    '<button type="button" class="lock-link" id="lock-pw">Use password instead</button>' +
+  cover.innerHTML = '<div class="lock-box"><div class="pin"></div>' +
+    '<button type="button" class="btn primary" id="lock-go-big" hidden>Unlock with Face ID</button>' +
     '<form id="lock-form" class="stack" style="gap:10px" novalidate hidden>' +
-    '<p class="hint" style="margin:0">This turns Face ID off. You can turn it back on in Settings.</p>' +
+    '<h2 class="pin-title">Account password</h2>' +
+    '<p class="hint" style="margin:0">Needs internet. This turns the lock off, and you can turn it back on in Settings.</p>' +
     '<input class="input" id="lock-pass" type="password" autocomplete="current-password" placeholder="Account password" aria-label="Account password">' +
-    '<button type="submit" class="btn" id="lock-pass-go" style="min-height:44px">Unlock</button></form></div>';
+    '<div class="form-msg" id="lock-msg" role="status"></div>' +
+    '<button type="submit" class="btn" id="lock-pass-go" style="min-height:44px">Unlock</button>' +
+    '<button type="button" class="lock-link" id="lock-back">Back</button></form>' +
+    '<button type="button" class="lock-link" id="lock-forgot">Forgot passcode?</button></div>';
+  pad = makePad(cover.querySelector(".pin"), {
+    title: "Enter passcode",
+    left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with Face ID">' + FACE_ICON + '</button>',
+    onPin: usePasscode,
+  });
   cover.querySelector("#lock-go").onclick = unlock;
-  cover.querySelector("#lock-pw").onclick = () => {
-    cover.querySelector("#lock-pw").hidden = true;
-    cover.querySelector("#lock-form").hidden = false;
-    cover.querySelector("#lock-msg").textContent = "";
-    cover.querySelector("#lock-pass").focus();
-  };
-  cover.querySelector("#lock-form").addEventListener("submit", usePassword);
+  cover.querySelector("#lock-go-big").onclick = unlock;
+  cover.querySelector("#lock-forgot").onclick = showAccountForm;
+  cover.querySelector("#lock-back").onclick = showUnlockChoices;
+  cover.querySelector("#lock-form").addEventListener("submit", useAccountPassword);
   document.body.appendChild(cover);
 }
 
 function showCover() {
-  if (!cover) buildCover();
+  const fresh = !cover;
+  if (fresh) buildCover();
+  if (fresh || cover.hidden) showUnlockChoices();
   cover.hidden = false;
 }
 function openApp() {
   locked = false;
-  if (!cover) return;
-  cover.hidden = true;
-  cover.querySelector("#lock-msg").textContent = "";
-  cover.querySelector("#lock-form").hidden = true;
-  cover.querySelector("#lock-pw").hidden = false;
-  cover.querySelector("#lock-pass").value = "";
+  if (cover) { cover.hidden = true; showUnlockChoices(); }
 }
 
 async function unlock() {
   if (asking) return;
   asking = true;
-  const msg = cover.querySelector("#lock-msg");
-  msg.textContent = "";
+  pad.say("");
   try {
     if (await askFaceId()) openApp();
-    else msg.textContent = "Face ID did not match. Try again.";
+    else pad.say("Face ID did not match. Try again.");
   } catch (e) {
-    // Cancelled, or iOS wants a tap first: the button is there. Anything else needs saying.
-    if (!e || e.name !== "NotAllowedError") { console.error(e); msg.textContent = "Face ID is not working. Use your password instead."; }
+    // Cancelled, or iOS wants a tap first: the Face ID key is there. Anything else needs saying.
+    if (!e || e.name !== "NotAllowedError") { console.error(e); pad.say("Face ID is not working. Use your passcode."); }
   }
   asking = false;
 }
 
-async function usePassword(ev) {
+async function usePasscode(pin) {
+  const problem = await tryPasscode(pin);
+  if (!problem) { openApp(); return; }
+  pad.say(problem);
+  pad.shake();
+  pad.reset();
+}
+
+async function useAccountPassword(ev) {
   ev.preventDefault();
   const pass = cover.querySelector("#lock-pass"), go = cover.querySelector("#lock-pass-go"), msg = cover.querySelector("#lock-msg");
   if (!pass.value) { msg.textContent = "Type your password."; return; }
   go.disabled = true;
+  msg.textContent = "";
   try {
     await verifyPassword(pass.value);
-    clearCred();
+    clearLock();
     openApp();
     if (card) mountLockCard(card);
   } catch (e) {
@@ -137,8 +224,8 @@ export async function startLock() {
   showCover();
   let user;
   try { user = await currentUser(); } catch (e) { console.error(e); }
-  // Signed out: the lock has no way back in, and the account's data is not on screen anyway.
-  if (user === null) { clearCred(); openApp(); return; }
+  // Signed out: a forgotten passcode would have no way back, and the account's data is not on screen anyway.
+  if (user === null) { clearLock(); openApp(); return; }
   if (!document.hidden) unlock();
 }
 
@@ -152,27 +239,68 @@ export async function mountLockCard(el) {
   let user = null;
   try { user = await currentUser(); } catch (e) { console.error(e); }
   if (!user) {
-    el.innerHTML = head("off") + '<p class="hint" style="margin:0">Sign in to your account first. Your password is the way back in if Face ID ever fails.</p>';
+    el.innerHTML = head("off") + '<p class="hint" style="margin:0">Sign in to your account first, so you can still get in if you forget your passcode.</p>';
     return;
   }
-  const on = !!savedCred();
-  el.innerHTML = head(on ? "on" : "off") +
-    '<p class="hint" style="margin:0">' + (on ? "Money Ledger asks for Face ID when you open it, and after a minute away." : "Ask for Face ID when you open Money Ledger, and after a minute away.") + '</p>' +
-    '<button type="button" class="btn" id="lock-toggle" style="align-self:flex-start">' + (on ? "Turn off" : "Turn on") + '</button><div class="form-msg" id="lock-card-msg" role="status"></div>';
-  const btn = el.querySelector("#lock-toggle"), msg = el.querySelector("#lock-card-msg");
+  if (savedCred()) mountOn(el, head); else mountOff(el, head);
+}
+
+function mountOff(el, head) {
+  el.innerHTML = head("off") +
+    '<p class="hint" style="margin:0">Ask for Face ID when you open Money Ledger, and after a minute away. A 6-digit passcode opens it if Face ID fails, even with no internet.</p>' +
+    '<button type="button" class="btn" id="lock-toggle" style="align-self:flex-start">Turn on</button><div class="form-msg" id="lock-card-msg" role="status"></div>';
+  const msg = el.querySelector("#lock-card-msg");
+  el.querySelector("#lock-toggle").onclick = () => {
+    msg.textContent = "";
+    let first = "";
+    padScreen({
+      title: "Create a 6-digit passcode",
+      onPin: async (pin, p, close) => {
+        if (!first) { first = pin; p.title("Enter it again"); p.reset(); return; }
+        if (pin !== first) { first = ""; p.title("Create a 6-digit passcode"); p.say("The two passcodes were different."); p.shake(); p.reset(); return; }
+        try {
+          // Face ID first: iOS only allows it straight after the tap, and the hash takes a moment.
+          const id = await createCred();
+          write(PASS_KEY, await makePassRecord(pin));
+          saveCred(id);
+          close();
+          mountLockCard(el);
+        } catch (e) {
+          if (!e || e.name !== "NotAllowedError") console.error(e);
+          close();
+          msg.textContent = "Could not turn on Face ID. Check that iCloud Keychain is on in iPhone Settings, then try again.";
+        }
+      },
+    });
+  };
+}
+
+function mountOn(el, head) {
+  const hasPin = !!read(PASS_KEY);
+  el.innerHTML = head("on") +
+    '<p class="hint" style="margin:0">Money Ledger asks for Face ID when you open it, and after a minute away.' + (hasPin ? "" : " Turn this off and on again to add a passcode that works with no internet.") + '</p>' +
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="lock-toggle">Turn off</button>' +
+    '<button type="button" class="btn" id="lock-off-pin" hidden>Turn off with passcode</button></div>' +
+    '<div class="form-msg" id="lock-card-msg" role="status"></div>';
+  const btn = el.querySelector("#lock-toggle"), msg = el.querySelector("#lock-card-msg"), viaPin = el.querySelector("#lock-off-pin");
+  const turnOff = () => { clearLock(); mountLockCard(el); };
   btn.onclick = async () => {
     btn.disabled = true; msg.textContent = "";
     try {
-      if (on) {
-        if (await askFaceId()) clearCred();
-      } else {
-        saveCred(await createCred());
-      }
-      mountLockCard(el);
+      if (await askFaceId()) { turnOff(); return; }
     } catch (e) {
-      btn.disabled = false;
       if (!e || e.name !== "NotAllowedError") console.error(e);
-      msg.textContent = on ? "Face ID did not finish, so it stays on." : "Could not turn on Face ID. Check that iCloud Keychain is on in iPhone Settings, then try again.";
     }
+    btn.disabled = false;
+    msg.textContent = "Face ID did not finish, so it stays on.";
+    viaPin.hidden = !hasPin;
   };
+  viaPin.onclick = () => padScreen({
+    title: "Enter passcode",
+    onPin: async (pin, p, close) => {
+      const problem = await tryPasscode(pin);
+      if (!problem) { close(); turnOff(); return; }
+      p.say(problem); p.shake(); p.reset();
+    },
+  });
 }
