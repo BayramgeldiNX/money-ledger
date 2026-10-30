@@ -1,6 +1,6 @@
 import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin } from "./lib/format.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays } from "./lib/dates.js";
-import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
+import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
 
 (function () {
   "use strict";
@@ -1168,6 +1168,20 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   const dayLabelY = (iso) => (iso.slice(0, 4) !== todayISO().slice(0, 4) ? dayLabel(iso) + ", " + iso.slice(0, 4) : dayLabel(iso));
 
+  // How much money you had when that day ended, from your wallets. A day before a wallet's balance was set is not guessed.
+  function moneyOnHTML(iso) {
+    const ws = state.config.wallets || []; if (!ws.length) return "";
+    const rate = state.config.rate, m = moneyOn(ws, { expenses: state.expenses, debts: state.debts, transfers: state.transfers, wallets: ws }, rate, iso);
+    const started = (w) => shortDate(isoOf(new Date(w.setAt)));
+    if (!m.known.length) {
+      const first = ws.slice().sort((a, b) => a.setAt - b.setAt)[0];
+      return '<div class="cal-money"><div class="cap">Money at the end of this day</div><p class="hint" style="margin:0">Not known. Your wallet balances start on ' + esc(started(first)) + ", so earlier days have no balance.</p></div>";
+    }
+    const parts = m.known.filter((x) => Math.abs(x.b) >= 0.005).map((x) => "<span>" + esc(x.w.name) + " <b>" + wMoney(x.w, x.b) + "</b></span>").join("");
+    return '<div class="cal-money"><div class="cap">Money at the end of ' + (iso === todayISO() ? "today" : "this day") + '</div><div class="val' + (m.total < 0 ? " up" : "") + '">' + rmb0(m.total) + '</div><div class="usd">' + usd(m.total / rate) + "</div>" +
+      (parts ? '<div class="split">' + parts + "</div>" : "") +
+      (m.missing.length ? '<p class="hint" style="margin:0">Not counting ' + esc(listJoin(m.missing.map((w) => w.name + " (starts " + started(w) + ")"))) + ".</p>" : "") + "</div>";
+  }
   // Month calendar for the Report: each day shaded by spending, tap a day for its details
   function calendarCardHTML(s, key) {
     const n = daysIn(key), [y, m] = key.split("-").map(Number);
@@ -1198,6 +1212,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const di = dayAll.filter(isInc).reduce((a, e) => a + R(e), 0), f = foodOn(sel);
       detail = '<div class="cal-detail"><div class="dh"><span class="cap">' + esc(sel === today ? "Today" : dayLabelY(sel)) + '</span><span class="hint">' + (lim > 0 ? "Food " + rmb0(f) + " of " + rmb0(lim) + (f > lim ? ' <span class="up">(over)</span>' : "") : "") + "</span></div>" +
         '<div class="dh"><b class="out-amt">' + rmb0(dr) + ' <span class="usd" style="font-size:14px">' + usd(du) + "</span></b>" + (di > 0 ? '<span class="inc-amt" style="font-weight:800">+' + rmb0(di) + " in</span>" : "") + "</div>" +
+        moneyOnHTML(sel) +
         (dayAll.length ? '<div class="entries">' + dayAll.map(entryHTML).join("") + "</div>" : '<p class="hint" style="margin:0">Nothing spent on this day.</p>') + "</div>";
     }
     return '<div class="card stack" style="gap:10px"><div class="head"><h2>Calendar</h2><span class="hint">tap a day · darker = more spent</span></div><div class="cal">' + cells + "</div>" +

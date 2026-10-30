@@ -80,3 +80,16 @@ export function walletMoves(w, data, rate, catName = (id) => id) {
 }
 
 export const walletBalance = (w, data, rate) => round2(w.balance + walletMoves(w, data, rate).reduce((a, m) => a + m.amt, 0));
+
+// What a wallet held at the end of a day. null for a day before its balance was set: that is not known, so it is never guessed.
+export function walletBalanceOn(w, data, rate, iso) {
+  if (iso < isoOf(new Date(w.setAt))) return null;
+  return round2(w.balance + walletMoves(w, data, rate).filter((m) => (m.date || "") <= iso).reduce((a, m) => a + m.amt, 0));
+}
+
+// All wallets at the end of a day, in yuan. `missing` = wallets whose balance starts after that day, left out of the total.
+export function moneyOn(wallets, data, rate, iso) {
+  const rows = wallets.map((w) => ({ w, b: walletBalanceOn(w, data, rate, iso) }));
+  const known = rows.filter((x) => x.b != null), missing = rows.filter((x) => x.b == null).map((x) => x.w);
+  return { total: round2(known.reduce((a, x) => a + wToRmb(x.w, x.b, rate), 0)), known, missing };
+}
