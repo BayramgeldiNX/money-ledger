@@ -86,7 +86,8 @@ export async function makeDb(uid) {
         get: async () => { const s = await F.getDoc(ref); return { exists: s.exists(), data: () => s.data() }; },
         set: (data) => F.setDoc(ref, data),
         delete: () => F.deleteDoc(ref),
-        onSnapshot: (ok, err) => F.onSnapshot(ref, (s) => ok({ exists: s.exists(), data: () => s.data() }), err),
+        // fromCache: "not found" may only mean this device has no copy yet. Metadata changes are what tell us when the server has answered.
+        onSnapshot: (ok, err) => F.onSnapshot(ref, { includeMetadataChanges: true }, (s) => ok({ exists: s.exists(), fromCache: s.metadata.fromCache, data: () => s.data() }), err),
       };
     },
   };

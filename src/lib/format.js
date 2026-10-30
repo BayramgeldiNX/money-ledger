@@ -26,6 +26,9 @@ export const parseAmt = (s) => {
   else if (/^-?\d{1,3}(,\d{3})+$/.test(t)) t = t.replace(/,/g, "");
   return /^-?(\d+\.?\d*|\.\d+)$/.test(t) ? Number(t) : NaN;
 };
+// A rate never has thousands, so its comma is always the decimal point: "6,7123" is 6.7123.
+export const parseRate = (s) => parseAmt(normNum(s).replace(",", "."));
+export const nOf = (n, one, many) => n + " " + (n === 1 ? one : many);
 // The amount inside a short note: "lunch 38 wechat", "rent 1,250", "午饭 38元", "2 coffees 30".
 // A number with a currency mark wins; otherwise the largest number (the small one is usually a count).
 const NUM = "\\d{1,3}(?:,\\d{3})+(?:\\.\\d{1,2})?|\\d+(?:[.,]\\d{1,2})?";

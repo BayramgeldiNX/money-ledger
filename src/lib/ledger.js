@@ -11,12 +11,31 @@ export const isInc = (e) => e.type === "income";
 export const isSave = (e) => !isInc(e) && e.kind === "save";
 export const isSpend = (e) => !isInc(e) && e.kind !== "save";
 
+// Saved data can arrive damaged (an old backup, a broken device). One bad row must never stop every screen from drawing.
+const isObj = (x) => !!x && typeof x === "object" && !Array.isArray(x);
+const text = (v) => (v == null ? "" : String(v));
+const rows = (list) => (Array.isArray(list) ? list.filter(isObj) : []);
+export const cleanExpenses = (list) => rows(list).map((e) => ({ ...e, date: text(e.date), reason: text(e.reason), note: text(e.note), method: text(e.method), cat: text(e.cat), amount: Number(e.amount) || 0 }));
+export const cleanDebts = (list) => rows(list).map((d) => ({ ...d, dir: d.dir === "owe" ? "owe" : "owed", person: text(d.person), amount: Number(d.amount) || 0, reason: text(d.reason), due: text(d.due),
+  start: text(d.start) || isoOf(new Date(Number(d.createdAt) || Date.now())), payments: rows(d.payments).map((p) => ({ ...p, amount: Number(p.amount) || 0, date: text(p.date) })) }));
+export const cleanTransfers = (list) => rows(list).map((t) => ({ ...t, from: text(t.from), to: text(t.to), date: text(t.date), amount: Number(t.amount) || 0 }));
+
+// Why a backup file must not be restored, or "" if it is fine. Checked before anything is changed.
+export function backupProblem(data) {
+  if (!isObj(data) || data.app !== "money-ledger" || !Array.isArray(data.expenses)) return "That file is not a Money Ledger backup.";
+  const damaged = "That backup is damaged, so nothing was changed.";
+  if ((data.debts != null && !Array.isArray(data.debts)) || (data.transfers != null && !Array.isArray(data.transfers)) || (data.config != null && !isObj(data.config))) return damaged;
+  const goodId = (x) => isObj(x) && x.id != null && x.id !== "" && !String(x.id).includes("/");
+  if (![data.expenses, data.debts || [], data.transfers || []].every((list) => list.every(goodId))) return damaged;
+  return data.expenses.every((e) => typeof e.date === "string") ? "" : damaged;
+}
+
 export const monthList = (expenses, key) => expenses.filter((e) => typeof e.date === "string" && e.date.slice(0, 7) === key);
 
 // all = every entry; list = spending only (no income, no savings). rmb/usd = spent.
 export function statsOf(expenses, key) {
   const all = monthList(expenses, key);
-  const s = { all, list: [], incList: [], rmb: 0, usd: 0, inc: 0, incU: 0, saved: 0, savedU: 0, count: all.length, byCat: {}, byInc: {}, byKind: { need: 0, want: 0, save: 0 } };
+  const s = { all, list: [], incList: [], rmb: 0, usd: 0, inc: 0, incU: 0, saved: 0, savedU: 0, count: all.length, byCat: Object.create(null), byInc: Object.create(null), byKind: { need: 0, want: 0, save: 0 } };
   all.forEach((e) => {
     const r = R(e), u = U(e);
     if (isInc(e)) {

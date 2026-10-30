@@ -1,6 +1,6 @@
-import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell } from "./lib/format.js";
-import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays } from "./lib/dates.js";
-import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf } from "./lib/ledger.js";
+import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
+import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
+import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem } from "./lib/ledger.js";
 
 (function () {
   "use strict";
@@ -98,7 +98,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // ---------- State ----------
   function normalizeConfig(d) {
     const c = d || {};
-    const cats = Array.isArray(c.categories) && c.categories.length ? c.categories : DEFAULT_CATS;
+    const listOf = (v, fallback) => { const l = Array.isArray(v) ? v.filter((x) => x && x.id) : []; return l.length ? l : fallback; };
+    const cats = listOf(c.categories, DEFAULT_CATS);
     return {
       rate: Number(c.rate) > 0 ? Number(c.rate) : DEFAULT_RATE,
       rateSetAt: Number(c.rateSetAt) > 0 ? Number(c.rateSetAt) : 0,
@@ -106,7 +107,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       foodLimit: c.foodLimit == null ? DEFAULT_FOOD_LIMIT : Math.max(0, Number(c.foodLimit) || 0),
       foodCats: Array.isArray(c.foodCats) ? c.foodCats.map(String) : DEFAULT_FOOD_CATS.slice(),
       bills: Array.isArray(c.bills) ? c.bills.filter((b) => b && b.id && Number(b.amount) > 0).map((b) => ({ id: String(b.id), type: b.type === "income" ? "income" : "expense", name: String(b.name || "Monthly bill"), cat: String(b.cat || "other"), amount: Number(b.amount), currency: b.currency === "USD" ? "USD" : "RMB", day: Math.min(31, Math.max(1, Math.round(Number(b.day) || 1))), method: String(b.method || "Bank transfer") })) : [],
-      incomeCats: (Array.isArray(c.incomeCats) && c.incomeCats.length ? c.incomeCats : DEFAULT_INCOME_CATS).map((x) => ({ id: String(x.id), name: String(x.name || "Income"), color: String(x.color || "#15803D"), kind: "income", budget: 0 })),
+      incomeCats: listOf(c.incomeCats, DEFAULT_INCOME_CATS).map((x) => ({ id: String(x.id), name: String(x.name || "Income"), color: String(x.color || "#15803D"), kind: "income", budget: 0 })),
       wallets: Array.isArray(c.wallets) ? c.wallets.filter((w) => w && w.id).map((w) => ({ id: String(w.id), name: String(w.name || "Wallet"), icon: String(w.icon || "w_other"), color: String(w.color || "#6B7280"), methods: Array.isArray(w.methods) ? w.methods.map(String) : [], currency: w.currency === "USD" ? "USD" : "RMB", balance: Number(w.balance) || 0, setAt: Number(w.setAt) || 0 })) : null,
       lastBackupAt: Number(c.lastBackupAt) || 0,
       // monthly shopping limit (Shopping + Clothing) and the "wait for next month" list
@@ -156,7 +157,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     read(key, fallback) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; } catch (e) { return fallback; } },
     write(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) { showError("This device's storage is full, so your last change may not be kept. Download a backup and delete old entries."); } }
   };
-  let outbox = local.read("ml.outbox", []), queueSeq = outbox.reduce((a, o) => Math.max(a, o.n || 0), 0);
+  let outbox = [].concat(local.read("ml.outbox", [])).filter((o) => o && typeof o.path === "string" && o.path.includes("/")), queueSeq = outbox.reduce((a, o) => Math.max(a, o.n || 0), 0);
   let flushing = false, syncState = "", retryTimer = 0;
   let refreshFromQueue = () => {}, flushOutbox = async () => {};
   const saveOutbox = () => local.write("ml.outbox", outbox);
@@ -175,7 +176,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         return list;
       };
       refreshFromQueue = () => {
-        state.expenses = overlay("expenses"); state.transfers = overlay("transfers"); state.debts = overlay("debts");
+        state.expenses = cleanExpenses(overlay("expenses")); state.transfers = cleanTransfers(overlay("transfers")); state.debts = cleanDebts(overlay("debts"));
         const pc = outbox.filter((o) => o.path === "config/main" && o.data).pop();
         if (pc) state.config = normalizeConfig(pc.data); else if (raw.config) state.config = normalizeConfig(raw.config);
       };
@@ -183,7 +184,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const queue = (path, data) => {
         outbox = outbox.filter((o) => o.path !== path).concat([{ path, data: data ? clean(data) : null, at: Date.now(), n: ++queueSeq }]);
         saveOutbox(); refreshFromQueue();
-        try { renderAll(path === "config/main"); } catch (err) { console.error(err); } finally { flushOutbox(); }
+        safeRender(path === "config/main"); flushOutbox();
       };
       const withTimeout = (p, ms) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej({ code: "timeout" }), ms))]);
       flushOutbox = async () => {
@@ -215,7 +216,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         addWithId: async (id, e) => queue("expenses/" + id, e),
         update: async (id, e) => queue("expenses/" + id, e),
         remove: async (id) => queue("expenses/" + id, null),
-        saveConfig: async (c) => queue("config/main", c),
+        // Until the real settings have arrived, what is on screen is only the defaults. Saving that would wipe wallets, limits and bills.
+        saveConfig: async (c) => { if (!state.configLoaded) throw { code: "not_loaded" }; queue("config/main", c); },
         billRunDone: async (id) => { if (queued("billruns/" + id)) return true; return (await withTimeout(db.doc("billruns/" + id).get(), 15000)).exists; },
         markBillRun: async (id) => queue("billruns/" + id, { at: Date.now() }),
         getReview: async (key) => { const d = await db.doc("reviews/" + key).get(); return d.exists ? d.data() : null; },
@@ -226,6 +228,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         transferDelete: async (id) => queue("transfers/" + id, null)
       };
       refreshFromQueue();
+      if (outbox.some((o) => o.path === "config/main" && o.data)) state.configLoaded = true;
       db.collection("transfers").onSnapshot((snap) => {
         raw.transfers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         refreshFromQueue(); renderBackground();
@@ -242,37 +245,41 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         runBills();
       }, (err) => { showError("Your expenses could not load (" + (err && err.code) + "). Reload the page to try again."); });
       db.doc("config/main").onSnapshot((snap) => {
+        // no copy on this device yet is not the same as no settings: wait for the server to say so
+        if (!snap.exists && snap.fromCache) return;
         if (snap.exists) raw.config = snap.data();
+        // Settings was drawn from the defaults, so anything typed there gives way to the real values
+        if (!state.configLoaded) state.settingsDirty = false;
         state.configLoaded = true;
         refreshFromQueue(); renderBackground(true);
         runBills();
-      }, () => { state.configLoaded = true; });
+      }, () => { showError("Your settings could not load. Reload the page to try again."); });
       flushOutbox();
     } else {
       state.mode = "local";
-      state.expenses = local.read("ml.expenses", []);
+      state.expenses = cleanExpenses(local.read("ml.expenses", []));
       state.config = normalizeConfig(local.read("ml.config", null));
       state.loaded = true; state.configLoaded = true;
       const persist = () => local.write("ml.expenses", state.expenses);
       const runs = local.read("ml.billruns", {});
       store = {
-        add: async (e) => { const id = uid(); state.expenses.push({ id, ...e }); persist(); renderAll(); return id; },
-        addWithId: async (id, e) => { state.expenses = state.expenses.filter((x) => x.id !== id).concat([{ id, ...e }]); persist(); renderAll(); },
-        update: async (id, e) => { state.expenses = state.expenses.map((x) => (x.id === id ? { id, ...e } : x)); persist(); renderAll(); },
-        remove: async (id) => { state.expenses = state.expenses.filter((x) => x.id !== id); persist(); renderAll(); },
-        saveConfig: async (c) => { state.config = normalizeConfig(c); local.write("ml.config", state.config); renderAll(true); },
+        add: async (e) => { const id = uid(); state.expenses.push({ id, ...e }); persist(); safeRender(); return id; },
+        addWithId: async (id, e) => { state.expenses = state.expenses.filter((x) => x.id !== id).concat([{ id, ...e }]); persist(); safeRender(); },
+        update: async (id, e) => { state.expenses = state.expenses.map((x) => (x.id === id ? { id, ...e } : x)); persist(); safeRender(); },
+        remove: async (id) => { state.expenses = state.expenses.filter((x) => x.id !== id); persist(); safeRender(); },
+        saveConfig: async (c) => { state.config = normalizeConfig(c); local.write("ml.config", state.config); safeRender(true); },
         billRunDone: async (id) => !!runs[id],
         markBillRun: async (id) => { runs[id] = Date.now(); local.write("ml.billruns", runs); },
         getReview: async (key) => local.read("ml.review." + key, null),
         saveReview: async (key, r) => local.write("ml.review." + key, r),
-        debtSet: async (id, d) => { state.debts = state.debts.filter((x) => x.id !== id).concat([{ id, ...d }]); local.write("ml.debts", state.debts); renderAll(); },
-        debtDelete: async (id) => { state.debts = state.debts.filter((x) => x.id !== id); local.write("ml.debts", state.debts); renderAll(); },
-        transferSet: async (id, t) => { state.transfers = state.transfers.filter((x) => x.id !== id).concat([{ id, ...t }]); local.write("ml.transfers", state.transfers); renderAll(); },
-        transferDelete: async (id) => { state.transfers = state.transfers.filter((x) => x.id !== id); local.write("ml.transfers", state.transfers); renderAll(); }
+        debtSet: async (id, d) => { state.debts = state.debts.filter((x) => x.id !== id).concat([{ id, ...d }]); local.write("ml.debts", state.debts); safeRender(); },
+        debtDelete: async (id) => { state.debts = state.debts.filter((x) => x.id !== id); local.write("ml.debts", state.debts); safeRender(); },
+        transferSet: async (id, t) => { state.transfers = state.transfers.filter((x) => x.id !== id).concat([{ id, ...t }]); local.write("ml.transfers", state.transfers); safeRender(); },
+        transferDelete: async (id) => { state.transfers = state.transfers.filter((x) => x.id !== id); local.write("ml.transfers", state.transfers); safeRender(); }
       };
-      state.transfers = local.read("ml.transfers", []);
-      state.debts = local.read("ml.debts", []); state.debtsLoaded = true;
-      renderAll(true);
+      state.transfers = cleanTransfers(local.read("ml.transfers", []));
+      state.debts = cleanDebts(local.read("ml.debts", [])); state.debtsLoaded = true;
+      safeRender(true);
       runBills();
     }
   }
@@ -281,7 +288,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const foodOn = (iso) => state.expenses.filter((e) => e.date === iso && isFood(e.cat) && isSpend(e)).reduce((a, e) => a + R(e), 0);
   const totalBudget = () => state.config.categories.reduce((a, c) => a + (c.budget || 0), 0);
   function reasonsFor(items) {
-    const map = {};
+    const map = Object.create(null);
     items.forEach((e) => {
       const label = (e.reason || "").trim() || NO_REASON;
       const r = (map[label.toLowerCase()] = map[label.toLowerCase()] || { label, rmb: 0, usd: 0, n: 0 });
@@ -307,7 +314,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     clearTimeout(bgTimer);
     if (formOpen()) { renderBanners(); bgTimer = setTimeout(renderBackground, 1500); return; }
     const c = bgConfig; bgConfig = false;
-    renderAll(c);
+    safeRender(c);
+  }
+  // A saved change is saved even if a screen then fails to draw, so that must never look like "could not save".
+  function safeRender(configChanged) {
+    try { renderAll(configChanged); } catch (err) { console.error(err); showError("A screen could not be drawn, but your data is safe. Close the app fully and open it again."); }
   }
   // The month arrows only change what Home, Settings' downloads and the Month and Year reports show
   function syncMonthSwitch() {
@@ -378,9 +389,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function setView(v) {
     // Leaving Settings keeps what you changed: Save is far down the page and easy to miss. A typing mistake keeps you here.
     if (state.view === "settings" && v !== "settings" && state.settingsDirty) {
-      const problem = settingsProblem();
-      if (problem) { toast(problem, true); return; }
-      saveSettings();
+      if (state.configLoaded) {
+        const problem = settingsProblem();
+        if (problem) { toast(problem, true); return; }
+        saveSettings();
+      } else state.settingsDirty = false;
     }
     const changed = state.view !== v;
     state.view = v;
@@ -391,7 +404,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("fab").hidden = v !== "home";
     document.body.classList.toggle("no-fab", v !== "home");
     $("fab").setAttribute("aria-label", v === "debts" ? "Add a debt" : "Add expense");
-    if (v === "settings") { state.settingsDirty = false; renderSettings(); }
+    // tapping the Settings tab while already on it must not throw away what you typed
+    if (v === "settings" && changed) { state.settingsDirty = false; renderSettings(); }
     if (v !== "limits") state.limEdit = null;
     if (v === "report") { lastReportAnim = null; playedCards.clear(); }
     pref.set("view", v);
@@ -595,7 +609,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
   // ---------- Favorites ----------
   function favorites() {
-    const map = {};
+    const map = Object.create(null);
     state.expenses.forEach((e) => {
       if (e.bill || isInc(e)) return;
       const r = (e.reason || "").trim(); if (!r) return;
@@ -832,7 +846,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     state.form.cat = id;
     $("f-cats").querySelectorAll(".chip").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cat === id)));
     if (state.form.type !== "income" && !state.form.kindTouched) setKind(catById(id).kind, false);
-    const seen = {};
+    const seen = Object.create(null);
     state.expenses.filter((e) => e.cat === id && e.reason).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0))
       .forEach((e) => { const k = e.reason.trim(); if (k && !seen[k.toLowerCase()]) seen[k.toLowerCase()] = k; });
     $("reason-suggest").innerHTML = Object.values(seen).slice(0, 12).map((r) => '<option value="' + esc(r) + '"></option>').join("");
@@ -964,7 +978,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       keep();
       const amount = parseAmt(ed.amount);
       if (!ed.cats.length) { $("lf-msg").textContent = "Pick at least one section."; return; }
-      if (!(amount > 0)) { $("lf-msg").textContent = "Enter the limit amount."; $("lf-amount").focus(); return; }
+      if (!(round2(amount) > 0)) { $("lf-msg").textContent = "Enter the limit amount."; $("lf-amount").focus(); return; }
       const before = (state.config.limits || []).map((x) => ({ ...x, cats: x.cats.slice() }));
       const item = { id: ed.id || "lim" + uid(), name: String(ed.name || "").trim(), cats: ed.cats.slice(), amount: round2(amount), period: ed.period === "week" ? "week" : "month" };
       const list = ed.id ? before.map((x) => (x.id === ed.id ? item : x)) : before.concat([item]);
@@ -1034,7 +1048,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   async function waitForNextMonth() {
     const n = parseAmt($("f-amount").value);
-    if (!(n > 0)) { $("f-msg").textContent = "Enter the amount first."; return; }
+    if (!(round2(n) > 0)) { $("f-msg").textContent = "Enter the amount first."; return; }
     const next = shiftMonth(curMonth(), 1), before = (state.config.later || []).slice();
     const item = { id: "l" + uid(), reason: $("f-reason").value.trim(), amount: round2(n), currency: state.form.currency, cat: state.form.cat, method: state.form.method, addedAt: Date.now(), forMonth: next };
     closeSheet();
@@ -1069,11 +1083,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const msg = $("f-msg");
     const amount = parseAmt($("f-amount").value);
     const income = state.form.type === "income";
-    if (!(amount > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; $("f-amount").focus(); return; }
+    if (!(round2(amount) > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; $("f-amount").focus(); return; }
     if (!state.form.cat) { msg.textContent = income ? "Pick where the money came from." : "Pick what it was for."; return; }
     const date = $("f-date").value || todayISO();
+    if (!saneDate(date)) { $("more").open = true; msg.textContent = "Check the date. The year looks wrong."; return; }
     const existing = state.editId ? state.expenses.find((x) => x.id === state.editId) : null;
     const fromLater = state.form.fromLater || null;
+    const laterItem = fromLater ? (state.config.later || []).find((l) => l.id === fromLater) : null;
     const rate = existing && existing.rate ? existing.rate : state.config.rate;
     const cur = state.form.currency;
     const e = {
@@ -1094,7 +1110,12 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         state.justAdded = id;
         
         closeSheet();
-        toast(savedText(e, id), false, id ? { label: "Undo", fn: async () => { try { await store.remove(id); toast("Removed", true); } catch (err) {} } } : null);
+        toast(savedText(e, id), false, id ? { label: "Undo", fn: async () => { try {
+          await store.remove(id);
+          // Undo of a buy puts it back on the waiting list
+          if (laterItem) { const later = (state.config.later || []).concat([laterItem]); await store.saveConfig({ ...state.config, later }); state.config = normalizeConfig({ ...state.config, later }); renderAll(); }
+          toast("Removed", true);
+        } catch (err) {} } } : null);
         // bought from the waiting list: take it off the list
         if (fromLater) { const lid = fromLater; state.form.fromLater = null; const rest = (state.config.later || []).filter((l) => l.id !== lid); try { await store.saveConfig({ ...state.config, later: rest }); state.config = normalizeConfig({ ...state.config, later: rest }); } catch (err) {} }
         if (date.slice(0, 7) !== state.month) state.month = date.slice(0, 7);
@@ -1241,7 +1262,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function goToDate(v) {
     // the picker's Reset button sends an empty date: back to the whole month
     if (!v) { state.selDay = null; renderHome(); return; }
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(v)) return;
+    if (!saneDate(v)) return;
     closeSearch();
     state.month = v.slice(0, 7); state.selDay = v; state.catFilter = null;
     if (state.view !== "home") setView("home"); else renderAll();
@@ -1430,7 +1451,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       out.push('<div class="card stack"><div class="head"><h2>By day of week</h2><span class="hint">average per day, ' + (spanDays >= 90 ? "last 90 days" : "since " + shortDate(sIso) + " (" + spanDays + " days)") + '</span></div><div>' + hbars(rows, (r) => rmb0(r.v)) + '</div><p class="hint" style="margin:0">You spend most on <b style="color:var(--ink)">' + top.full + "s</b>. Weekend days average " + rmb0(wk) + ", weekdays " + rmb0(wd) + ". Debt payments and monthly bills are left out." + (spanDays < 28 ? (Math.min(...wcount) <= 1 ? " Some weekdays have only been counted once so far" : " Each weekday has been counted only " + Math.min(...wcount) + " times so far") + ", so this gets more reliable over the coming weeks." : "") + "</p></div>");
     }
     // 3. Payment methods (this month)
-    const pm = {};
+    const pm = Object.create(null);
     s.list.forEach((e) => { const k = e.method || "Other"; pm[k] = (pm[k] || 0) + R(e); });
     const pmr = Object.entries(pm).sort((a, b) => b[1] - a[1]).map(([l, v]) => ({ l, v }));
     if (pmr.length) out.push('<div class="card stack"><div class="head"><h2>How you paid</h2><span class="hint">this month</span></div><div>' + hbars(pmr, (r) => pct(r.v, s.rmb) + "% · " + rmb0(r.v)) + "</div></div>");
@@ -1500,7 +1521,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       L.push("\nDaily food limit " + rmb0(state.config.foodLimit) + " (groceries + dining): kept on " + ok + " of " + tracked + " logged days.");
     }
     L.push("\nBiggest expenses: " + s.list.slice().sort((a, b) => R(b) - R(a)).slice(0, 6).map((e) => (e.reason || catById(e.cat).name) + " " + rmb0(R(e)) + " (" + e.date + ")").join("; "));
-    const pm = {}; s.list.forEach((e) => { pm[e.method || "Other"] = (pm[e.method || "Other"] || 0) + R(e); });
+    const pm = Object.create(null); s.list.forEach((e) => { pm[e.method || "Other"] = (pm[e.method || "Other"] || 0) + R(e); });
     L.push("Payment methods: " + Object.entries(pm).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + rmb0(v)).join(", "));
     if (state.config.bills.length) L.push("Monthly bills set up: " + state.config.bills.map((b) => b.name + " " + (b.currency === "RMB" ? rmb0(b.amount) : usd0(b.amount)) + (b.type === "income" ? " (income)" : "")).join(", "));
     L.push("Exchange rate: 1 USD = " + state.config.rate + " CNY.");
@@ -1561,7 +1582,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const weekStart = () => state.weekOf || mondayOf(todayISO());
   function weekStats(mon, len) {
     const days = Array.from({ length: len || 7 }, (_, i) => addDays(mon, i)), set = new Set(days);
-    const st = { days, spent: 0, spentU: 0, inc: 0, saved: 0, byCat: {}, byDay: {}, list: [], count: 0 };
+    const st = { days, spent: 0, spentU: 0, inc: 0, saved: 0, byCat: Object.create(null), byDay: {}, list: [], count: 0 };
     state.expenses.forEach((e) => {
       if (!set.has(e.date)) return;
       st.count++;
@@ -1675,7 +1696,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const s = st[i], future = m > cm;
       return '<button type="button" class="ybar' + (m === state.month ? " sel" : "") + '" style="--i:' + i + '" data-goto-month="' + m + '"' + (future && !s.count ? " disabled" : "") + ' title="' + esc(monthName(m)) + ": " + rmb0(s.rmb) + '"><span class="yv">' + (s.rmb ? compactRmb(s.rmb) : "") + '</span><span class="yb">' + (s.inc > 0 ? '<i class="ghost" style="height:' + (s.inc / max) * 100 + '%"></i>' : "") + '<i style="height:' + (s.rmb / max) * 100 + '%"></i></span><span class="yl">' + monthName(m, { month: "short" }) + "</span></button>";
     }).join("");
-    const byCat = {};
+    const byCat = Object.create(null);
     st.forEach((s) => Object.entries(s.byCat).forEach(([c, v]) => { byCat[c] = byCat[c] || { r: 0, u: 0 }; byCat[c].r += v.rmb; byCat[c].u += v.usd; }));
     const rows = Object.entries(byCat).sort((a, b) => b[1].r - a[1].r).map(([cid, v]) => {
       const c = catById(cid);
@@ -1841,7 +1862,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       html += '<div class="card stack"><div class="head"><h2>Income vs spending</h2></div><div class="flow">' +
         cell("Income", s.inc, s.incU, "inc") + cell("Spent", s.rmb, s.usd, "out-amt") + cell("Saved", s.saved, s.savedU) + cell("Left", s.left, s.leftU, s.left < 0 ? "up" : "") + "</div>" +
         (s.inc > 0 ? '<div class="rate-line">Savings rate <span class="' + (rate >= 20 ? "down" : "up") + '" style="font-weight:800">' + rate + '%</span> <span class="muted">(saved + left, out of income). Aim for 20% or more.</span></div>' +
-          "<div>" + Object.entries(s.byInc).sort((a, b) => b[1].rmb - a[1].rmb).map(([cid, v]) => { const c = catById(cid); return '<div class="yrow">' + tile(c, "tile sm") + '<span class="name">' + esc(c.name) + "<small>" + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 2).map((r) => r.label).join(", ") || v.count + " entries") + '</small></span><span class="pct">' + pct(v.rmb, s.inc) + '%</span><span class="amt inc-amt">+' + rmb0(v.rmb) + '<small class="usd">' + usd0(v.usd) + "</small></span></div>"; }).join("") + "</div>"
+          "<div>" + Object.entries(s.byInc).sort((a, b) => b[1].rmb - a[1].rmb).map(([cid, v]) => { const c = catById(cid); return '<div class="yrow">' + tile(c, "tile sm") + '<span class="name">' + esc(c.name) + "<small>" + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 2).map((r) => r.label).join(", ") || nOf(v.count, "entry", "entries")) + '</small></span><span class="pct">' + pct(v.rmb, s.inc) + '%</span><span class="amt inc-amt">+' + rmb0(v.rmb) + '<small class="usd">' + usd0(v.usd) + "</small></span></div>"; }).join("") + "</div>"
           : '<p class="hint" style="margin:0">Add income with the + button to see what is left and your savings rate.</p>') + "</div>";
     }
     html += '<div class="card stmt-card"><div style="min-width:0"><h2 style="font-size:17px;font-weight:800">Monthly statement</h2><p class="hint" style="margin:2px 0 0">A clean PDF of ' + esc(monthName(key, { month: "long" })) + ": where money came from, where it went, debts and every entry. Print it, share it or save it to Files.</p></div>" +
@@ -1923,8 +1944,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         '<button type="button" class="btn primary big" id="ws-start" style="flex:none">Start tracking</button></div>';
       $("ws-date").value = todayISO(); $("ws-date").max = todayISO();
       $("ws-start").onclick = async () => {
+        if ($("ws-date").value && !saneDate($("ws-date").value)) { toast("Check the date. The year looks wrong.", true); return; }
         const now = balanceTime($("ws-date").value);
-        const bad = DEFAULT_WALLETS.find((w) => { const t = $("ws-" + w.id).value.trim(); return t && !isFinite(parseAmt(t)); });
+        const bad =DEFAULT_WALLETS.find((w) => { const t = $("ws-" + w.id).value.trim(); return t && !isFinite(parseAmt(t)); });
         if (bad) { toast("Check the amount for " + bad.name + ", for example 1250.", true); return; }
         const list = DEFAULT_WALLETS.map((w) => { const v = parseAmt($("ws-" + w.id).value); return { ...w, balance: isFinite(v) ? round2(v) : 0, setAt: now }; });
         await saveWallets(list, "Wallets ready. They update as you add entries");
@@ -1995,6 +2017,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (fs) fs.onclick = async () => {
         const v = parseAmt(d.querySelector('[data-wform="set"] input').value);
         if (!isFinite(v)) { toast("Enter the balance, for example 1250.", true); return; }
+        const dv = d.querySelector("[data-wdate]") && d.querySelector("[data-wdate]").value;
+        if (dv && !saneDate(dv)) { toast("Check the date. The year looks wrong.", true); return; }
         state.openWallets[w.id] = true;
         await saveWallets(ws.map((x) => (x.id === w.id ? { ...x, balance: round2(v), setAt: balanceTime(d.querySelector("[data-wdate]") && d.querySelector("[data-wdate]").value) } : x)), w.name + " set to " + wMoney(w, v) + balanceDayText(d.querySelector("[data-wdate]") && d.querySelector("[data-wdate]").value));
       };
@@ -2020,11 +2044,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const fm = d.querySelector('[data-wsave="move"]');
       if (fm) fm.onclick = async () => {
         const f = d.querySelector('[data-wform="move"]'), to = f.querySelector("select").value, amt = parseAmt(f.querySelector("[data-mamt]").value);
-        if (!(amt > 0)) { toast("Enter how much you moved.", true); return; }
+        if (!(round2(amt) > 0)) { toast("Enter how much you moved.", true); return; }
         const dest = ws.find((x) => x.id === to);
         const cross = dest && wCur(dest) !== wCur(w);
         const got = cross ? parseAmt(f.querySelector("[data-mgot]").value) : amt;
-        if (cross && !(got > 0)) { toast("Enter how much you received.", true); return; }
+        if (cross && !(round2(got) > 0)) { toast("Enter how much you received.", true); return; }
         const id = "t" + uid(), tr = { from: w.id, to, amount: round2(amt), amountTo: round2(got), date: todayISO(), createdAt: Date.now() };
         try {
           await store.transferSet(id, tr);
@@ -2056,7 +2080,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     try {
       await dl.save({ filename: "money-ledger-backup-" + todayISO() + ".json", data: JSON.stringify(data, null, 1) });
       try { await store.saveConfig({ ...state.config, lastBackupAt: Date.now() }); state.config.lastBackupAt = Date.now(); } catch (e) {}
-      msg.textContent = ""; toast("Backup saved: " + data.expenses.length + " entries, " + data.debts.length + " debts");
+      msg.textContent = ""; toast("Backup saved: " + nOf(data.expenses.length, "entry", "entries") + ", " + nOf(data.debts.length, "debt", "debts"));
       if (state.view === "settings") $("bk-last").textContent = "Last backup today";
     } catch (e) { msg.textContent = e && e.code === "declined" ? "Backup cancelled." : "Could not save the backup right now."; }
   }
@@ -2066,14 +2090,16 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     r.onload = () => {
       let data = null;
       try { data = JSON.parse(String(r.result)); } catch (e) { data = null; }
-      if (!data || data.app !== "money-ledger" || !Array.isArray(data.expenses)) { msg.textContent = "That file is not a Money Ledger backup."; panel.hidden = true; return; }
+      const problem = backupProblem(data);
+      if (problem) { msg.textContent = problem; panel.hidden = true; return; }
       msg.textContent = "";
+      data.expenses = cleanExpenses(data.expenses); data.debts = cleanDebts(data.debts); data.transfers = cleanTransfers(data.transfers);
       const ids = new Set(state.expenses.map((e) => e.id));
       const newCount = data.expenses.filter((e) => e && e.id && !ids.has(e.id)).length;
       panel.hidden = false;
       panel.innerHTML = '<div class="bk-box"><div><b>Backup from ' + esc(data.exportedAt ? new Date(data.exportedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "unknown date") + "</b></div>" +
-        "<div>" + data.expenses.length + " entries · " + (data.debts || []).length + " debts · " + (data.transfers || []).length + " wallet moves" + "</div>" +
-        '<div class="hint">Add missing: keeps everything here and adds the ' + newCount + " entries you do not have yet. Replace: deletes what is here now and puts the backup in its place.</div>" +
+        "<div>" + nOf(data.expenses.length, "entry", "entries") + " · " + nOf(data.debts.length, "debt", "debts") + " · " + nOf(data.transfers.length, "wallet move", "wallet moves") + "</div>" +
+        '<div class="hint">Add missing: keeps everything here and adds the ' + nOf(newCount, "entry", "entries") + " you do not have yet. Replace: deletes what is here now and puts the backup in its place.</div>" +
         '<div class="form-actions"><button type="button" class="btn primary" id="bk-merge">Add missing</button><button type="button" class="btn danger" id="bk-replace">Replace everything</button><button type="button" class="btn" id="bk-cancel">Cancel</button></div><div class="hint" id="bk-prog"></div></div>';
       $("bk-cancel").onclick = () => { panel.hidden = true; };
       $("bk-merge").onclick = () => restoreBackup(data, false);
@@ -2088,28 +2114,30 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   async function restoreBackup(data, replace) {
     const prog = $("bk-prog"), btns = $("bk-panel").querySelectorAll("button");
+    if (!state.configLoaded) { prog.textContent = "Your settings are still loading. Try again in a moment."; return; }
     btns.forEach((b) => (b.disabled = true));
     const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "id" && k !== "_pending"));
     let done = 0;
     try {
-      if (replace) {
-        const ex = state.expenses.slice(), de = state.debts.slice(), tr = state.transfers.slice();
-        for (const e of ex) { await store.remove(e.id); if (++done % 20 === 0) prog.textContent = "Clearing… " + done; }
-        for (const d of de) await store.debtDelete(d.id);
-        for (const t of tr) await store.transferDelete(t.id);
-      }
       const have = new Set(replace ? [] : state.expenses.map((e) => e.id)), haveD = new Set(replace ? [] : state.debts.map((d) => d.id)), haveT = new Set(replace ? [] : state.transfers.map((t) => t.id));
-      done = 0;
-      const exps = data.expenses.filter((e) => e && e.id && !have.has(e.id));
+      const exps = data.expenses.filter((e) => !have.has(String(e.id)));
       for (const e of exps) { await store.addWithId(String(e.id), strip(e)); if (++done % 10 === 0) prog.textContent = "Restoring entries… " + done + " of " + exps.length; }
-      for (const d of (data.debts || []).filter((d) => d && d.id && !haveD.has(d.id))) await store.debtSet(String(d.id), strip(d));
-      for (const t of (data.transfers || []).filter((t) => t && t.id && !haveT.has(t.id))) await store.transferSet(String(t.id), strip(t));
+      for (const d of data.debts.filter((x) => !haveD.has(String(x.id)))) await store.debtSet(String(d.id), strip(d));
+      for (const t of data.transfers.filter((x) => !haveT.has(String(x.id)))) await store.transferSet(String(t.id), strip(t));
+      // Replace removes the old data only after the backup is safely in, so a problem half way can never leave you with less than you had
+      if (replace) {
+        const inFile = (list) => new Set(list.map((x) => String(x.id)));
+        const keepE = inFile(data.expenses), keepD = inFile(data.debts), keepT = inFile(data.transfers);
+        for (const e of state.expenses.filter((x) => !keepE.has(x.id))) await store.remove(e.id);
+        for (const d of state.debts.filter((x) => !keepD.has(x.id))) await store.debtDelete(d.id);
+        for (const t of state.transfers.filter((x) => !keepT.has(x.id))) await store.transferDelete(t.id);
+      }
       if (data.config && (replace || !state.config.wallets)) {
         const cfg = replace ? data.config : { ...state.config, wallets: data.config.wallets || state.config.wallets };
         await store.saveConfig(cfg); state.config = normalizeConfig(cfg);
       }
       $("bk-panel").hidden = true;
-      toast(replace ? "Backup restored" : "Added " + exps.length + " entries from the backup");
+      toast(replace ? "Backup restored" : "Added " + nOf(exps.length, "entry", "entries") + " from the backup");
       renderAll("force");
     } catch (e) {
       prog.textContent = "Stopped after " + done + " items: " + (e && e.code === "quota_exceeded" ? "storage is full." : "connection problem. Try again; items already restored are kept.");
@@ -2158,13 +2186,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       '<button type="button" class="btn primary big" id="debt-add" style="flex:none">+ Add a debt</button></div>';
 
     // group open debts by person, net amount per person
-    const people = {};
+    const people = Object.create(null);
     open.forEach((d) => { const k = personKey(d.person); (people[k] = people[k] || { name: String(d.person).trim(), items: [], net: 0 }).items.push(d); people[k].net += (d.dir === "owed" ? 1 : -1) * toRmb(d, leftOf(d)); });
     const list = Object.entries(people).map(([k, p]) => { p.key = k; p.next = p.items.map(dueInfo).filter((i) => i.days != null).sort((a, b) => a.days - b.days)[0] || null; return p; })
       .sort((a, b) => (a.next ? a.next.days : 9999) - (b.next ? b.next.days : 9999) || Math.abs(b.net) - Math.abs(a.net));
     const personHTML = (p) => {
       const items = p.items.slice().sort((a, b) => (a.due || "9999") < (b.due || "9999") ? -1 : 1);
-      return '<details class="person" data-pk="' + esc(p.key) + '"' + (state.openPeople[p.key] ? " open" : "") + "><summary>" + avatar(p.name) +
+      return '<details class="person" data-pk="' + esc(p.key) + '"' + (state.openPeople[p.key] === true ? " open" : "") + "><summary>" + avatar(p.name) +
         '<span style="min-width:0"><div class="pname">' + esc(p.name) + '</div><div class="psub">' + (p.next ? '<span class="badge ' + p.next.cls + '">' + esc(p.next.text) + "</span>" : "") + "<span>" + items.length + " open</span></div></span>" +
         '<span class="pamt ' + (p.net >= 0 ? "inc-amt" : "up") + '">' + rmb0(Math.abs(p.net)) + "<small>" + (p.net >= 0 ? "owes you" : "you owe") + "</small></span></summary>" +
         items.map((d) => {
@@ -2253,7 +2281,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   async function recordPayment(d, amount, walletId) {
     const left = leftOf(d);
-    if (!(amount > 0)) { toast("Enter the amount that was paid.", true); return; }
+    if (!(round2(amount) > 0)) { toast("Enter the amount that was paid.", true); return; }
     const amt = round2(Math.min(amount, left));
     const before = Object.fromEntries(Object.entries(d).filter(([k]) => k !== "id"));
     const payments = (d.payments || []).concat([{ id: uid(), date: todayISO(), amount: amt, wallet: walletId || "", at: Date.now() }]);
@@ -2275,7 +2303,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     }
     try {
       await store.debtSet(d.id, doc);
-      toast((fully ? "Settled with " + String(d.person).trim() : "Recorded " + dMoney(d, amt) + " · " + dMoney(d, round2(left - amt)) + " left") + (walletName(walletId) ? " · " + walletName(walletId) + (d.dir === "owed" ? " +" : " −") + rmb0(toRmb(d, amt)) : ""), false,
+      toast((fully ? "Settled with " + String(d.person).trim() : "Recorded " + dMoney(d, amt) + " · " + dMoney(d, round2(left - amt)) + " left") + (walletName(walletId) ? " · " + walletName(walletId) + (d.dir === "owed" ? " +" : " −") + inWalletText(walletId, d, amt) : ""), false,
         { label: "Undo", fn: async () => { try { await store.debtSet(d.id, before); toast("Undone", true); } catch (e) {} } });
     } catch (e) { toast("Could not save. Try again.", true); }
   }
@@ -2283,6 +2311,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // Debt form (its own bottom sheet)
   const dForm = { dir: "owed", currency: "RMB", wallet: "" };
   const walletName = (id) => { const w = id && (state.config.wallets || []).find((x) => x.id === id); return w ? w.name : ""; };
+  // what a debt amount comes to in that wallet's own money: a dollar wallet shows dollars
+  const inWalletText = (id, d, amt) => { const w = (state.config.wallets || []).find((x) => x.id === id); return w ? wMoney(w, inWalletCur(w, d, amt)) : ""; };
   const defaultWallet = () => { const ws = state.config.wallets || []; const byMethod = walletOf(DEFAULT_METHOD); return (byMethod || ws[0] || { id: "" }).id; };
   // wallet picker for a pay-back: the debt's own wallet first, then the others, then "No wallet"
   // wallet buttons for a pay-back: the debt's own wallet is picked first; a debt without one starts on Alipay
@@ -2313,7 +2343,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     setDebtDir(d ? d.dir : "owed"); setDebtCur(d && d.currency === "USD" ? "USD" : "RMB");
     $("d-person").value = d ? d.person : ""; $("d-amount").value = d ? d.amount : ""; $("d-reason").value = d ? d.reason || "" : "";
     $("d-start").value = d ? d.start : todayISO(); $("d-due").value = d ? d.due || "" : ""; $("d-msg").textContent = "";
-    const names = {}; state.debts.forEach((x) => { names[personKey(x.person)] = String(x.person).trim(); });
+    const names = Object.create(null); state.debts.forEach((x) => { names[personKey(x.person)] = String(x.person).trim(); });
     $("d-people").innerHTML = Object.values(names).map((n) => '<option value="' + esc(n) + '"></option>').join("");
     clearGhosts();
     $("scrim").hidden = false; $("dsheet").hidden = false; $("dsheet").scrollTop = 0; syncSheetLock();
@@ -2330,8 +2360,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     ev.preventDefault();
     const msg = $("d-msg"), person = $("d-person").value.trim(), amount = parseAmt($("d-amount").value);
     if (!person) { msg.textContent = "Write the person's name."; $("d-person").focus(); return; }
-    if (!(amount > 0)) { msg.textContent = "Enter the amount."; $("d-amount").focus(); return; }
+    if (!(round2(amount) > 0)) { msg.textContent = "Enter the amount."; $("d-amount").focus(); return; }
     const start = $("d-start").value || todayISO(), due = $("d-due").value || "";
+    if (!saneDate(start) || (due && !saneDate(due))) { msg.textContent = "Check the dates. A year looks wrong."; return; }
     if (due && due < start) { msg.textContent = "The pay-back date is before the start date."; return; }
     const old = state.debtEditId ? state.debts.find((x) => x.id === state.debtEditId) : null;
     const doc = { dir: dForm.dir, person, amount: round2(amount), currency: dForm.currency, rate: old && old.rate ? old.rate : state.config.rate, reason: $("d-reason").value.trim(), start, due,
@@ -2346,7 +2377,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       await store.debtSet(id, doc);
       state.openPeople = { [personKey(person)]: true };
       closeDebtSheet();
-      toast(old ? "Debt updated" : (doc.dir === "owed" ? person + " owes you " : "You owe " + person + " ") + dMoney(doc, doc.amount) + (doc.wallet && !old ? " · " + walletName(doc.wallet) + (doc.dir === "owed" ? " −" : " +") + rmb0(toRmb(doc, doc.amount)) : ""));
+      toast(old ? "Debt updated" : (doc.dir === "owed" ? person + " owes you " : "You owe " + person + " ") + dMoney(doc, doc.amount) + (doc.wallet && !old ? " · " + walletName(doc.wallet) + (doc.dir === "owed" ? " −" : " +") + inWalletText(doc.wallet, doc, doc.amount) : ""));
     } catch (e) { msg.textContent = "Could not save. Check your connection and try again."; }
     finally { $("d-save").disabled = false; }
   }
@@ -2383,8 +2414,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => {
       readCatRows();
       const i = Number(b.dataset.del), c = draftCats[i];
+      if (draftCats.length <= 1) { $("s-msg").textContent = "Keep at least one section."; return; }
       const used = state.expenses.filter((e) => e.cat === c.id).length;
-      if (used && b.dataset.armed !== "1") { b.dataset.armed = "1"; $("s-msg").textContent = "“" + c.name + "” has " + used + " entries. Tap × again to remove it (they will show as Other)."; return; }
+      if (used && b.dataset.armed !== "1") { b.dataset.armed = "1"; $("s-msg").textContent = "“" + c.name + "” has " + nOf(used, "entry", "entries") + ". Tap × again to remove it (" + (used === 1 ? "it" : "they") + " will show as Other)."; return; }
       draftCats.splice(i, 1); state.settingsDirty = true; $("s-msg").textContent = "Removed. Tap Save settings to keep this change."; drawCatRows();
     }));
   }
@@ -2411,7 +2443,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const i = Number(b.dataset.idel), c = draftIncs[i];
       if (draftIncs.length <= 1) { $("s-msg").textContent = "Keep at least one income source."; return; }
       const used = state.expenses.filter((e) => isInc(e) && e.cat === c.id).length;
-      if (used && b.dataset.armed !== "1") { b.dataset.armed = "1"; $("s-msg").textContent = "“" + c.name + "” has " + used + " entries. Tap × again to remove it."; return; }
+      if (used && b.dataset.armed !== "1") { b.dataset.armed = "1"; $("s-msg").textContent = "“" + c.name + "” has " + nOf(used, "entry", "entries") + ". Tap × again to remove it."; return; }
       draftIncs.splice(i, 1); state.settingsDirty = true; $("s-msg").textContent = "Removed. Tap Save settings to keep this change."; drawIncRows();
     }));
   }
@@ -2420,8 +2452,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   // what is wrong with what was typed in Settings, or "" if it can be saved
   function settingsProblem() {
-    const rate = parseAmt($("s-rate").value);
-    if (!(rate > 0 && rate < 100)) return "Enter the rate as yuan per dollar, for example 6.70.";
+    const rate = parseRate($("s-rate").value);
+    if (!(rate >= 0.0001 && rate < 100)) return "Enter the rate as yuan per dollar, for example 6.70.";
     const foodText = $("s-food").value.trim();
     if (foodText && !(parseAmt(foodText) >= 0)) return "Check the daily food limit. Use a number, or 0 to turn it off.";
     const badBudget = (draftCats || []).find((c, i) => { const el = $("sc-bud-" + i), t = el ? el.value.trim() : ""; return t && !(parseAmt(t) >= 0); });
@@ -2430,8 +2462,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   async function saveSettings() {
     const problem = settingsProblem();
     if (problem) { $("s-msg").textContent = problem; return; }
+    if (!state.configLoaded) { $("s-msg").textContent = "Your settings are still loading. Try again in a moment."; return; }
     readCatRows(); readIncRows();
-    const rate = parseAmt($("s-rate").value);
+    const rate = parseRate($("s-rate").value);
     const food = parseAmt($("s-food").value);
     const newRate = Math.round(rate * 10000) / 10000;
     const cfg = { ...state.config, rate: newRate, rateSetAt: newRate !== state.config.rate || !state.config.rateSetAt ? Date.now() : state.config.rateSetAt,
@@ -2475,7 +2508,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const rate = s.inc > 0 ? pct(s.inc - s.rmb, s.inc) : null;
     const kpi = (l, v, u, cls) => '<div class="s-kpi"><div class="l">' + l + '</div><div class="v ' + (cls || "") + '">' + v + '</div><div class="u">' + u + "</div></div>";
     blocks.push('<div class="s-head"><div><div class="s-brand">' + LOGO_SVG + 'Money Ledger</div><div class="s-title">Monthly statement</div><div class="s-sub">' + esc(mName) + (key === curMonth() ? " · month in progress, up to " + esc(dayLabel(todayISO())) : "") + "</div></div>" +
-      '<div class="s-meta">Prepared <b>' + esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })) + "</b><br>Main currency: <b>Chinese yuan (¥)</b><br>Exchange rate: <b>¥" + state.config.rate.toFixed(2) + " = $1</b><br>" + s.count + " entries</div></div>");
+      '<div class="s-meta">Prepared <b>' + esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })) + "</b><br>Main currency: <b>Chinese yuan (¥)</b><br>Exchange rate: <b>¥" + state.config.rate.toFixed(2) + " = $1</b><br>" + nOf(s.count, "entry", "entries") + "</div></div>");
     blocks.push('<div class="s-kpis">' + kpi("Money in", rmb0(s.inc), usd(s.incU), "g") + kpi("Money out (spent)", rmb0(s.rmb), usd(s.usd)) + kpi("Moved to savings", rmb0(s.saved), usd(s.savedU)) + kpi("Left", rmb0(s.left), usd(s.leftU), s.left < 0 ? "r" : "") + "</div>");
     const notes = [];
     if (rate != null) notes.push("Savings rate <b class='" + (rate >= 20 ? "g" : "r") + "'>" + rate + "%</b> of income (saved plus left over).");
@@ -2485,7 +2518,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
     // Money in
     const incRows = Object.entries(s.byInc).sort((a, b) => b[1].rmb - a[1].rmb);
-    blocks.push('<div class="s-sec"><h3>Where money came from <span>' + rmb0(s.inc) + " · " + s.incList.length + " entries</span></h3>" +
+    blocks.push('<div class="s-sec"><h3>Where money came from <span>' + rmb0(s.inc) + " · " + nOf(s.incList.length, "entry", "entries") + "</span></h3>" +
       (incRows.length ? '<table class="s-t"><thead><tr><th>Source</th><th>Details</th><th class="n">Entries</th><th class="n">Share</th><th class="n">Yuan</th><th class="n">Dollars</th></tr></thead><tbody>' +
         incRows.map(([cid, v]) => { const c = catById(cid); return '<tr><td><span class="dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="w m">' + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 3).map((r) => r.label).join(", ")) + '</td><td class="n">' + v.count + '</td><td class="n">' + pct(v.rmb, s.inc) + '%</td><td class="n g"><b>+' + rmb0(v.rmb) + '</b></td><td class="n m">' + usd0(v.usd) + "</td></tr>"; }).join("") +
         '<tr class="tot"><td>Total in</td><td></td><td class="n">' + s.incList.length + '</td><td></td><td class="n g">+' + rmb0(s.inc) + '</td><td class="n">' + usd0(s.incU) + "</td></tr></tbody></table>"
@@ -2494,7 +2527,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     // Money out
     const outRows = Object.entries(s.byCat).sort((a, b) => b[1].rmb - a[1].rmb);
     const maxOut = Math.max(1, ...outRows.map(([, v]) => v.rmb));
-    blocks.push('<div class="s-sec"><h3>Where money went <span>' + rmb0(s.rmb) + " spent · " + s.list.length + " entries</span></h3>" +
+    blocks.push('<div class="s-sec"><h3>Where money went <span>' + rmb0(s.rmb) + " spent · " + nOf(s.list.length, "entry", "entries") + "</span></h3>" +
       (outRows.length ? '<table class="s-t"><thead><tr><th>Section</th><th>Main reasons</th><th></th><th class="n">Share</th><th class="n">vs last month</th><th class="n">Yuan</th><th class="n">Dollars</th></tr></thead><tbody>' +
         outRows.map(([cid, v]) => {
           const c = catById(cid), p = (prev.byCat[cid] || { rmb: 0 }).rmb, d = v.rmb - p;
@@ -2508,7 +2541,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
     // Needs / wants / savings + payment methods
     const kb = s.byKind, base = s.inc > 0 ? s.inc : s.rmb + s.saved, kp = (v) => (base > 0 ? Math.round((v / base) * 100) : 0);
-    const pm = {}; s.list.forEach((e) => { pm[e.method || "Other"] = (pm[e.method || "Other"] || 0) + R(e); });
+    const pm = Object.create(null); s.list.forEach((e) => { pm[e.method || "Other"] = (pm[e.method || "Other"] || 0) + R(e); });
     if (s.rmb + s.saved > 0) blocks.push('<div class="s-two"><div class="s-sec"><h3>Needs, wants, savings <span>' + (s.inc > 0 ? "of income" : "of money out") + '</span></h3><div class="s-split">' +
       [["need", "#0B0B0F"], ["want", "#2B47E6"], ["save", "#1C9A55"]].map(([k, col]) => (kb[k] > 0 ? '<div style="width:' + Math.min(kp(kb[k]), 100) + "%;background:" + col + '"></div>' : "")).join("") + "</div>" +
       '<table class="s-t"><tbody><tr><td><span class="dot" style="background:#0B0B0F"></span>Needs</td><td class="n">' + kp(kb.need) + '%</td><td class="n">' + rmb0(kb.need) + '</td><td class="n m">guide ≤50%</td></tr><tr><td><span class="dot" style="background:#2B47E6"></span>Wants</td><td class="n">' + kp(kb.want) + '%</td><td class="n">' + rmb0(kb.want) + '</td><td class="n m">guide ≤30%</td></tr><tr><td><span class="dot" style="background:#1C9A55"></span>Savings</td><td class="n">' + kp(kb.save) + '%</td><td class="n">' + rmb0(kb.save) + '</td><td class="n m">guide ≥20%</td></tr></tbody></table></div>' +
@@ -2601,7 +2634,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     let dl = null;
     try { dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; } catch (e) { dl = null; }
     if (!dl) { msg.textContent = "Could not start the download."; return; }
-    try { await dl.save({ filename: all ? "money-ledger-all.csv" : "money-ledger-" + state.month + ".csv", data: toCSV(list) }); msg.textContent = "Downloaded " + list.length + " entries."; }
+    try { await dl.save({ filename: all ? "money-ledger-all.csv" : "money-ledger-" + state.month + ".csv", data: toCSV(list) }); msg.textContent = "Downloaded " + nOf(list.length, "entry", "entries") + "."; }
     catch (e) { msg.textContent = e && e.code === "declined" ? "Download cancelled." : "Could not download right now."; }
   }
 
@@ -2672,8 +2705,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       state.settingsDirty = true; drawIncRows();
       const last = $("si-name-" + (draftIncs.length - 1)); if (last) { last.focus(); last.select(); }
     };
-    $("m-prev").onclick = () => { state.month = shiftMonth(state.month, -1); state.selDay = null; state.slide = "prev"; renderAll(); };
-    $("m-next").onclick = () => { state.month = shiftMonth(state.month, 1); state.selDay = null; state.slide = "next"; renderAll(); };
+    $("m-prev").onclick = () => { state.month = shiftMonth(state.month, -1); clearDay(); state.slide = "prev"; renderAll(); };
+    $("m-next").onclick = () => { state.month = shiftMonth(state.month, 1); clearDay(); state.slide = "next"; renderAll(); };
     $("s-save").onclick = saveSettings;
     ["s-rate", "s-food"].forEach((id) => ($(id).oninput = () => (state.settingsDirty = true)));
     $("s-addcat").onclick = () => {
@@ -2686,7 +2719,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("b-add").onclick = async () => {
       const msg = $("b-msg"), name = $("b-name").value.trim(), amount = parseAmt($("b-amount").value), day = Math.round(parseAmt($("b-day").value));
       if (!name) { msg.textContent = "Give the bill a name, like Rent."; return; }
-      if (!(amount > 0)) { msg.textContent = "Enter the amount."; return; }
+      if (!(round2(amount) > 0)) { msg.textContent = "Enter the amount."; return; }
       if (!(day >= 1 && day <= 31)) { msg.textContent = "Enter the day of the month it is paid (1 to 31)."; return; }
       msg.textContent = "";
       const b = { id: "b" + uid(), name, cat: $("b-cat").value, amount: round2(amount), currency: $("b-cur").value, day, method: $("b-method").value || DEFAULT_METHOD };
@@ -2706,7 +2739,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     updateMoreSummary();
     const v = pref.get("view", "home");
     setView(["home", "report", "wallets", "debts", "limits", "settings"].includes(v) ? v : "home");
-    initStore();
+    initStore().catch((e) => { console.error(e); showError("Your data could not load. Close the app fully and open it again."); });
     initSample();
     watchKeyboard();
     smoothDetails($("v-wallets"));
