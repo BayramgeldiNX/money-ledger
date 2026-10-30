@@ -517,7 +517,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (!favs.length || state.editId || state.form.type === "income") { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML = '<span class="cap">One tap to add again today</span><div class="chips">' +
-      favs.map((e, i) => '<button type="button" class="chip fav" data-i="' + i + '">' + tile(catById(e.cat), "ci") + esc(e.reason) + " <b>" + (e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount)) + "</b></button>").join("") + "</div>";
+      favs.map((e, i) => '<button type="button" class="chip fav" data-i="' + i + '">' + tile(catById(e.cat), "ci") + '<span class="fr">' + esc(e.reason) + "</span><b>" + (e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount)) + "</b></button>").join("") + "</div>";
     box.querySelectorAll(".fav").forEach((b) => (b.onclick = () => quickAdd(favs[Number(b.dataset.i)], b)));
   }
   async function quickAdd(src, btn) {
