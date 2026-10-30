@@ -514,6 +514,12 @@ main { padding-block: 0 110px; }
 .form-actions { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .form-msg { font-size: 14px; color: var(--bad); font-weight: 700; }
 .form-msg:empty { display: none; }
+.lock-screen { position: fixed; inset: 0; z-index: 60; background: var(--bg); display: grid; place-items: center; padding: calc(24px + env(safe-area-inset-top, 0px)) 24px calc(24px + env(safe-area-inset-bottom, 0px)); overflow-y: auto; }
+.lock-box { width: 100%; max-width: 320px; align-items: stretch; text-align: center; }
+.lock-box h2 { font-size: 20px; }
+.lock-box .btn { min-height: 48px; }
+.lock-icon { align-self: center; color: var(--ink); }
+.lock-link { border: 0; background: none; color: var(--muted); font: inherit; font-size: 14px; min-height: 44px; }
 .link-btn { border: 0; background: transparent; color: var(--accent); font-weight: 700; font-size: 13.5px; padding: 4px 0; align-self: flex-start; }
 
 /* Report */
