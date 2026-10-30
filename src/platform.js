@@ -6,15 +6,27 @@ import { syncAvailable, currentUser, makeDb } from "./sync/firebase.js";
 //   "sample"    -> null: Claude-written money review and receipt reading are off in the standalone app.
 //   "downloads" -> a plain file download.
 
-function saveFile({ filename, data }) {
-  const type = /\.csv$/i.test(filename) ? "text/csv;charset=utf-8" : /\.json$/i.test(filename) ? "application/json" : "application/octet-stream";
+const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+
+async function saveFile({ filename, data }) {
+  const type = /\.csv$/i.test(filename) ? "text/csv;charset=utf-8" : /\.json$/i.test(filename) ? "application/json" : /\.pdf$/i.test(filename) ? "application/pdf" : "application/octet-stream";
   // a leading BOM makes Excel read Chinese text in a CSV correctly
   const blob = data instanceof Blob ? data : new Blob(/\.csv$/i.test(filename) ? ["﻿", data] : [data], { type });
+  // A Home Screen app on iPhone has no downloads, so use the share sheet: Save to Files, AirDrop, WeChat…
+  if (isIOS && navigator.canShare) {
+    const file = new File([blob], filename, { type: blob.type || type });
+    if (navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file] }); return; }
+      catch (e) {
+        if (e && e.name === "AbortError") { const err = new Error("cancelled"); err.code = "declined"; throw err; }
+        // NotAllowedError: the tap expired while a long file was being made. Fall through to a normal download.
+      }
+    }
+  }
   const url = URL.createObjectURL(blob), a = document.createElement("a");
   a.href = url; a.download = filename; a.rel = "noopener";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
-  return Promise.resolve();
 }
 
 const capabilities = {

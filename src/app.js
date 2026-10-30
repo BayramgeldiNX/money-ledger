@@ -370,13 +370,36 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
 
   // ---------- Sheet (add / edit) ----------
-  let lastFocus = null;
+  let lastFocus = null, lockY = 0;
+  // Holds the page still behind an open sheet and puts it back where it was on close
+  function syncSheetLock() {
+    const open = !$("sheet").hidden || !$("dsheet").hidden, body = document.body;
+    if (open === body.classList.contains("sheet-open")) return;
+    if (open) { lockY = window.scrollY; body.style.top = -lockY + "px"; body.classList.add("sheet-open"); }
+    else { body.classList.remove("sheet-open"); body.style.top = ""; window.scrollTo(0, lockY); }
+  }
+  // iPhone keyboard: --kb is its height, so an open sheet can sit on top of it instead of behind it
+  function watchKeyboard() {
+    const vv = window.visualViewport; if (!vv) return;
+    const root = document.documentElement;
+    const update = () => {
+      const h = window.innerHeight - vv.height - vv.offsetTop, kb = h > 80 ? Math.round(h) : 0;
+      const was = root.classList.contains("kb-open");
+      root.style.setProperty("--kb", kb + "px");
+      root.classList.toggle("kb-open", kb > 0);
+      const a = document.activeElement;
+      if (kb && !was && a && a.closest && a.closest(".sheet")) setTimeout(() => a.scrollIntoView({ block: "nearest" }), 60);
+    };
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    update();
+  }
   function openSheet() {
     lastFocus = document.activeElement;
     const sh = $("sheet");
     sh.style.transform = ""; sh.style.transition = "";
     $("scrim").hidden = false; sh.hidden = false; sh.scrollTop = 0;
-    document.body.classList.add("sheet-open");
+    syncSheetLock();
     renderMethodChips();
     renderFavs();
     // On a computer, put the cursor in the amount. On iPhone the keypad would cover the one-tap buttons, so wait for a tap.
@@ -402,11 +425,17 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (dy > 110) { sh.style.transform = "translateY(100%)"; setTimeout(closeFn, 190); }
       else sh.style.transform = "";
     });
+    // iOS can cancel a touch (a system gesture, a call): spring back instead of staying half-dragged
+    sh.addEventListener("touchcancel", () => {
+      if (sy == null) return;
+      sy = null; sh.style.transition = "transform .2s ease-out"; $("scrim").style.opacity = ""; sh.style.transform = "";
+    });
   }
   function closeSheet() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
-    $("scrim").hidden = true; $("sheet").hidden = true; $("sheet").style.transform = ""; $("scrim").style.opacity = "";
-    document.body.classList.remove("sheet-open");
+    $("sheet").hidden = true; $("sheet").style.transform = ""; $("scrim").style.opacity = "";
+    if ($("dsheet").hidden) $("scrim").hidden = true;
+    syncSheetLock();
     resetForm();
     if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
   }
@@ -2145,13 +2174,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("d-start").value = d ? d.start : todayISO(); $("d-due").value = d ? d.due || "" : ""; $("d-msg").textContent = "";
     const names = {}; state.debts.forEach((x) => { names[personKey(x.person)] = String(x.person).trim(); });
     $("d-people").innerHTML = Object.values(names).map((n) => '<option value="' + esc(n) + '"></option>').join("");
-    $("scrim").hidden = false; $("dsheet").hidden = false; $("dsheet").scrollTop = 0; document.body.classList.add("sheet-open");
+    $("scrim").hidden = false; $("dsheet").hidden = false; $("dsheet").scrollTop = 0; syncSheetLock();
     if (window.innerWidth > 640) $("d-person").focus({ preventScroll: true });
   }
   function closeDebtSheet() {
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $("dsheet").hidden = true; $("dsheet").style.transform = "";
-    if ($("sheet").hidden) { $("scrim").hidden = true; document.body.classList.remove("sheet-open"); }
+    if ($("sheet").hidden) { $("scrim").hidden = true; $("scrim").style.opacity = ""; }
+    syncSheetLock();
   }
   async function saveDebt(ev) {
     ev.preventDefault();
@@ -2430,7 +2460,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("f-date").value = todayISO();
     renderMethodChips();
     setCurrency(state.form.currency);
-    document.querySelectorAll(".cur-toggle button").forEach((b) => (b.onclick = () => { setCurrency(b.dataset.cur); $("f-amount").focus(); }));
+    document.querySelectorAll(".cur-toggle button").forEach((b) => (b.onclick = () => { setCurrency(b.dataset.cur); if (window.innerWidth > 640) $("f-amount").focus(); }));
     $("f-kind").querySelectorAll("button").forEach((b) => (b.onclick = () => setKind(b.dataset.kind, true)));
     $("f-type").querySelectorAll("button").forEach((b) => (b.onclick = () => { if (state.form.type !== b.dataset.type) setType(b.dataset.type); }));
     $("f-amount").addEventListener("input", () => { renderConvert(); $("f-msg").textContent = ""; });
@@ -2518,14 +2548,15 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     enterClicks(["s-food", "s-rate"], "s-save");
     $("bk-save").onclick = saveBackup;
     $("bk-file").addEventListener("change", () => { const f = $("bk-file").files && $("bk-file").files[0]; $("bk-file").value = ""; if (f) readBackup(f); });
-    $("x-pdf").onclick = () => makeStatement(state.month, $("x-pdf"));
+    $("x-pdf").onclick = () => { $("x-msg").textContent = ""; makeStatement(state.month, $("x-pdf")); };
 
     renderCatChips();
     updateMoreSummary();
     const v = pref.get("view", "home");
-    setView(["home", "report", "wallets", "debts", "settings"].includes(v) ? v : "home");
+    setView(["home", "report", "wallets", "debts", "limits", "settings"].includes(v) ? v : "home");
     initStore();
     initSample();
+    watchKeyboard();
     enableSheetSwipe("sheet", closeSheet);
     enableSheetSwipe("dsheet", closeDebtSheet);
   }
