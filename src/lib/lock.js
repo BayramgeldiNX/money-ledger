@@ -1,7 +1,8 @@
 // Pure rules for the Face ID lock (the screen and the Face ID calls are in src/lock.js).
 
 export const RELOCK_AFTER_MS = 60 * 1000;
-export const PIN_LENGTH = 6;
+export const PIN_LENGTH = 4;
+const OLD_PIN_LENGTH = 6; // passcodes saved before the switch to 4 digits have no length on them
 const PASS_ITERATIONS = 310000;
 const FREE_TRIES = 5;
 const FIRST_WAIT_MS = 30 * 1000;
@@ -25,11 +26,13 @@ async function hashPassword(password, salt, iterations) {
 }
 export async function makePassRecord(password, iterations = PASS_ITERATIONS) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  return { salt: toB64(salt), hash: await hashPassword(password, salt, iterations), iterations };
+  return { salt: toB64(salt), hash: await hashPassword(password, salt, iterations), iterations, digits: password.length };
 }
 export async function checkPassword(password, record) {
   return !!record && (await hashPassword(password, fromB64(record.salt), record.iterations)) === record.hash;
 }
+
+export const pinLengthOf = (record) => (record && record.digits) || OLD_PIN_LENGTH;
 
 // Five free tries, then 30 seconds, doubling up to 15 minutes.
 export function waitAfterFails(fails) {

@@ -1,8 +1,8 @@
 // Face ID lock for the iPhone app. It uses a passkey only as a way to ask iOS for Face ID, so it is a
 // lock screen on this device: it does not encrypt anything, and the data stays protected by the sign-in.
-// A 6-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
+// A 4-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
 // passcode, which is why turning the lock on needs a signed-in account.
-import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
+import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
 
 const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails";
@@ -49,6 +49,8 @@ async function askFaceId() {
   return toB64(cred.rawId) === savedCred();
 }
 
+const savedPinLength = () => pinLengthOf(read(PASS_KEY));
+
 // Checks the passcode, counting wrong tries. Returns "" when it is right, or what to tell the owner.
 async function tryPasscode(pin) {
   const fails = read(FAILS_KEY) || { n: 0, at: 0 };
@@ -60,30 +62,31 @@ async function tryPasscode(pin) {
 }
 
 // ---- The number pad: title, dots, and 0-9. onPin gets the digits when all of them are in. ----
-function makePad(host, { title, left, onPin }) {
+function makePad(host, { title, left, length, onPin }) {
   let digits = "", busy = false;
   const key = (d) => '<button type="button" class="pin-key" data-d="' + d + '">' + d + '</button>';
-  host.innerHTML = '<h2 class="pin-title"></h2><div class="pin-dots" aria-hidden="true">' + '<span></span>'.repeat(PIN_LENGTH) + '</div>' +
+  host.innerHTML = '<h2 class="pin-title"></h2><div class="pin-dots" aria-hidden="true"></div>' +
     '<div class="pin-msg" role="status"></div><div class="pin-keys">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key).join("") +
     left + key(0) + '<button type="button" class="pin-key plain" data-del aria-label="Delete">' + DELETE_ICON + '</button></div>';
-  const dots = [...host.querySelectorAll(".pin-dots span")], msg = host.querySelector(".pin-msg"), head = host.querySelector(".pin-title");
-  const paint = () => dots.forEach((s, i) => s.classList.toggle("on", i < digits.length));
+  const row = host.querySelector(".pin-dots"), msg = host.querySelector(".pin-msg"), head = host.querySelector(".pin-title");
+  const paint = () => { row.innerHTML = Array.from({ length: length() }, (_, i) => '<span' + (i < digits.length ? ' class="on"' : "") + '></span>').join(""); };
   const pad = {
     title: (text) => { head.textContent = text; },
     say: (text) => { msg.textContent = text; },
     reset: () => { digits = ""; busy = false; paint(); },
-    shake: () => { const row = host.querySelector(".pin-dots"); row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake"); },
+    shake: () => { row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake"); },
   };
   pad.title(title);
+  paint();
   host.querySelector(".pin-keys").addEventListener("click", (ev) => {
     const b = ev.target.closest("button");
     if (!b || busy) return;
     if (b.hasAttribute("data-del")) { digits = digits.slice(0, -1); paint(); return; }
-    if (!b.dataset.d || digits.length >= PIN_LENGTH) return;
+    if (!b.dataset.d || digits.length >= length()) return;
     digits += b.dataset.d;
     msg.textContent = "";
     paint();
-    if (digits.length === PIN_LENGTH) { busy = true; onPin(digits); }
+    if (digits.length === length()) { busy = true; onPin(digits); }
   });
   return pad;
 }
@@ -142,6 +145,7 @@ function buildCover() {
     '<button type="button" class="lock-link" id="lock-forgot">Forgot passcode?</button></div>';
   pad = makePad(cover.querySelector(".pin"), {
     title: "Enter passcode",
+    length: savedPinLength,
     left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with Face ID">' + FACE_ICON + '</button>',
     onPin: usePasscode,
   });
@@ -247,17 +251,18 @@ export async function mountLockCard(el) {
 
 function mountOff(el, head) {
   el.innerHTML = head("off") +
-    '<p class="hint" style="margin:0">Ask for Face ID when you open Money Ledger, and after a minute away. A 6-digit passcode opens it if Face ID fails, even with no internet.</p>' +
+    '<p class="hint" style="margin:0">Ask for Face ID when you open Money Ledger, and after a minute away. A 4-digit passcode opens it if Face ID fails, even with no internet.</p>' +
     '<button type="button" class="btn" id="lock-toggle" style="align-self:flex-start">Turn on</button><div class="form-msg" id="lock-card-msg" role="status"></div>';
   const msg = el.querySelector("#lock-card-msg");
   el.querySelector("#lock-toggle").onclick = () => {
     msg.textContent = "";
     let first = "";
     padScreen({
-      title: "Create a 6-digit passcode",
+      title: "Create a 4-digit passcode",
+      length: () => PIN_LENGTH,
       onPin: async (pin, p, close) => {
         if (!first) { first = pin; p.title("Enter it again"); p.reset(); return; }
-        if (pin !== first) { first = ""; p.title("Create a 6-digit passcode"); p.say("The two passcodes were different."); p.shake(); p.reset(); return; }
+        if (pin !== first) { first = ""; p.title("Create a 4-digit passcode"); p.say("The two passcodes were different."); p.shake(); p.reset(); return; }
         try {
           // Face ID first: iOS only allows it straight after the tap, and the hash takes a moment.
           const id = await createCred();
@@ -297,6 +302,7 @@ function mountOn(el, head) {
   };
   viaPin.onclick = () => padScreen({
     title: "Enter passcode",
+    length: savedPinLength,
     onPin: async (pin, p, close) => {
       const problem = await tryPasscode(pin);
       if (!problem) { close(); turnOff(); return; }

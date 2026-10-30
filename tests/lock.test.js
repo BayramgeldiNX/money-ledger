@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, waitAfterFails, RELOCK_AFTER_MS } from "../src/lib/lock.js";
+import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH, RELOCK_AFTER_MS } from "../src/lib/lock.js";
 
 describe("isIOS", () => {
   it("knows iPhone and iPad", () => {
@@ -43,6 +43,11 @@ describe("app password", () => {
   it("gives the same password a different hash each time", async () => {
     const [a, b] = await Promise.all([makePassRecord("4821", 1000), makePassRecord("4821", 1000)]);
     expect(a.hash).not.toBe(b.hash);
+  });
+  it("new passcodes are 4 digits; one saved earlier without a length stays 6", async () => {
+    expect(PIN_LENGTH).toBe(4);
+    expect(pinLengthOf(await makePassRecord("4821", 1000))).toBe(4);
+    expect(pinLengthOf({ salt: "x", hash: "y", iterations: 1 })).toBe(6);
   });
   it("refuses when there is no saved password", async () => {
     expect(await checkPassword("4821", null)).toBe(false);
