@@ -651,6 +651,13 @@ main { padding-block: 0 110px; }
     .sheet:not([hidden]) { animation: sheetUp .46s cubic-bezier(.32, .72, 0, 1); }
     @keyframes sheetUp { from { transform: translateY(100%); } }
   }
+  /* Closing: quicker than opening, and the form leaves as one piece */
+  .sheet.sheet-ghost:not([hidden]) { animation: sheetDown .24s cubic-bezier(.4, 0, 1, 1) forwards; pointer-events: none; }
+  .sheet.sheet-ghost #add-form > * { animation: none; }
+  .scrim.scrim-ghost:not([hidden]) { animation: fadeOut .24s ease-in forwards; pointer-events: none; }
+  @keyframes fadeOut { to { opacity: 0; } }
+  @keyframes sheetDown { to { transform: translateY(100%); } }
+  @media (min-width: 641px) { @keyframes sheetDown { to { transform: translateY(calc(-50% + 24px)); opacity: 0; } } }
 }
 
 /* Motion: calm and quick. Everything here is skipped when the phone asks for reduced motion. */

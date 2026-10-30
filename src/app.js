@@ -450,12 +450,31 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     lastFocus = document.activeElement;
     const sh = $("sheet");
     sh.style.transform = ""; sh.style.transition = "";
+    clearGhosts();
     $("scrim").hidden = false; sh.hidden = false; sh.scrollTop = 0;
     syncSheetLock();
     renderMethodChips();
     renderFavs();
     // On a computer, put the cursor in the amount. On iPhone the keypad would cover the one-tap buttons, so wait for a tap.
     if (!state.editId && window.innerWidth > 640) $("f-amount").focus({ preventScroll: true });
+  }
+  // Closing: a copy of the sheet slides away while the real one is already closed and reset,
+  // so saving, clearing the form and reopening never have to wait for the animation.
+  let ghosts = [], ghostTimer = 0;
+  function clearGhosts() { clearTimeout(ghostTimer); ghosts.forEach((g) => g.remove()); ghosts = []; }
+  function slideAway(sh, withScrim) {
+    if (sh.hidden || reduceMotion()) return;
+    clearGhosts();
+    // a swipe has already carried the sheet off screen, so only the backdrop is left to fade
+    if (!sh.style.transform) {
+      const cs = getComputedStyle(sh), g = sh.cloneNode(true);
+      g.classList.add("sheet-ghost"); g.inert = true;
+      g.style.bottom = cs.bottom; g.style.maxHeight = cs.maxHeight;
+      document.body.appendChild(g); g.scrollTop = sh.scrollTop;
+      ghosts.push(g);
+    }
+    if (withScrim) { const s = $("scrim").cloneNode(false); s.classList.add("scrim-ghost"); s.removeAttribute("id"); document.body.appendChild(s); ghosts.push(s); }
+    ghostTimer = setTimeout(clearGhosts, 300);
   }
   // iPhone: drag the form down to close it, like a native sheet
   function enableSheetSwipe(sheetId, close) {
@@ -484,6 +503,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     });
   }
   function closeSheet() {
+    slideAway($("sheet"), $("dsheet").hidden);
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $("sheet").hidden = true; $("sheet").style.transform = ""; $("scrim").style.opacity = "";
     if ($("dsheet").hidden) $("scrim").hidden = true;
@@ -2234,10 +2254,12 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("d-start").value = d ? d.start : todayISO(); $("d-due").value = d ? d.due || "" : ""; $("d-msg").textContent = "";
     const names = {}; state.debts.forEach((x) => { names[personKey(x.person)] = String(x.person).trim(); });
     $("d-people").innerHTML = Object.values(names).map((n) => '<option value="' + esc(n) + '"></option>').join("");
+    clearGhosts();
     $("scrim").hidden = false; $("dsheet").hidden = false; $("dsheet").scrollTop = 0; syncSheetLock();
     if (window.innerWidth > 640) $("d-person").focus({ preventScroll: true });
   }
   function closeDebtSheet() {
+    slideAway($("dsheet"), $("sheet").hidden);
     if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
     $("dsheet").hidden = true; $("dsheet").style.transform = "";
     if ($("sheet").hidden) { $("scrim").hidden = true; $("scrim").style.opacity = ""; }
