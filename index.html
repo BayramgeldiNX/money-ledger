@@ -47,7 +47,8 @@
 
     <div class="toolbar on-bg">
       <h2 class="list-title" id="list-title">Entries</h2>
-      <label class="icon-btn date-btn" id="date-btn" title="Go to a date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg><input type="date" id="jump" aria-label="Go to a date"></label>
+      <button type="button" class="icon-btn date-btn" id="date-btn" title="Go to a date" aria-label="Go to a date"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg></button>
+      <input type="date" id="jump" hidden>
       <button type="button" class="icon-btn" id="search-btn" aria-label="Search" aria-pressed="false"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.2-4.2"/></svg></button>
     </div>
     <div class="search-row" id="search-row" hidden>
@@ -282,6 +283,20 @@
     <div class="form-msg" id="d-msg" role="status"></div>
     <div class="form-actions"><button type="submit" class="btn primary big" id="d-save">Save</button></div>
   </form>
+</div>
+<div class="sheet" id="csheet" role="dialog" aria-modal="true" aria-labelledby="c-title" hidden>
+  <div class="grab" aria-hidden="true"></div>
+  <div class="stack">
+    <div class="sheet-head"><h2 id="c-title">Go to a date</h2><button type="button" class="close-btn" id="csheet-close" aria-label="Close">✕</button></div>
+    <div class="cal-nav">
+      <button type="button" class="icon-btn" id="c-prev" aria-label="Previous month">‹</button>
+      <span class="cal-month" id="c-label" aria-live="polite"></span>
+      <button type="button" class="icon-btn" id="c-next" aria-label="Next month">›</button>
+    </div>
+    <div class="cal" id="c-grid"></div>
+    <div class="hint" style="text-align:center">Darker days had more spending</div>
+    <div class="form-actions"><button type="button" class="btn big" id="c-clear">Show the whole month</button></div>
+  </div>
 </div>
 <div class="toast" id="toast" hidden></div>
 <script type="module" src="/src/main.js"></script>
