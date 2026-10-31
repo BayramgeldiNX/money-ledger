@@ -39,7 +39,7 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 - `design/`: icon artwork + `make-icons.ps1`. `scripts/gen-icons.mjs` builds `public/` icons from it (`npm run gen:icons`).
 
 ## Data model (collections in the Artifact; same shape for Firestore)
-- `expenses/{id}`: `{ date, amount, currency, rate, usd, rmb, cat, kind (need|want|save|income), type?: "income", reason, method, note, createdAt, bill?, billId? }`
+- `expenses/{id}`: `{ date, amount, currency, rate, usd, rmb, cat, kind (need|want|save|income), type?: "income", reason, method, note, createdAt, bill?, billId?, rateGuess? }` (`rateGuess`: saved before this device had the settings; `fixGuessedRates` in `app.js` corrects it, also on `debts`, and removes the mark)
 - `config/main`: `{ rate, rateSetAt, foodLimit, foodCats, categories[], incomeCats[], wallets[], bills[], limits[], later[], lastBackupAt }`
   - wallet `{ id, name, icon, color, methods[], currency, balance, setAt }`; limit `{ id, name, cats[], amount, period: week|month }`;
     waiting-list item `{ id, reason, amount, currency, cat, method, addedAt, forMonth }`.

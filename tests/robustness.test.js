@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { statsOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, walletBalance } from "../src/lib/ledger.js";
+import { statsOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, walletBalance, settingsToSave, withRealRate } from "../src/lib/ledger.js";
 import { saneDate } from "../src/lib/dates.js";
 import { parseRate, nOf } from "../src/lib/format.js";
 
@@ -52,6 +52,38 @@ describe("backups are checked before anything changes", () => {
   it("refuses a damaged one", () => {
     const damaged = [{ debts: {} }, { transfers: 5 }, { config: "x" }, { config: [] }, { expenses: [null] }, { expenses: [{ date: "2026-10-30" }] }, { expenses: [{ id: "a/b", date: "2026-10-30" }] }, { expenses: [{ id: "a" }] }, { debts: [{}] }];
     for (const change of damaged) expect(backupProblem({ ...ok, ...change })).toMatch(/damaged/);
+  });
+});
+
+describe("Settings saved on one device keep what another device changed", () => {
+  const cats = [{ id: "a", name: "Food" }];
+  const drawn = { rate: 7.1, foodLimit: 50, categories: cats, incomeCats: [] };
+  const latest = { rate: 7.5, rateSetAt: 9, foodLimit: 50, categories: cats, incomeCats: [], wallets: ["w"], bills: ["b"] };
+  it("an edit to the food limit does not bring the old rate back", () => {
+    const c = settingsToSave(latest, drawn, { ...drawn, foodLimit: 88 }, 100);
+    expect(c).toMatchObject({ rate: 7.5, rateSetAt: 9, foodLimit: 88, wallets: ["w"], bills: ["b"] });
+  });
+  it("a rate really changed here is saved and dated now", () => {
+    expect(settingsToSave(latest, drawn, { ...drawn, rate: 6.9 }, 100)).toMatchObject({ rate: 6.9, rateSetAt: 100 });
+  });
+  it("sections edited here are saved, and left alone otherwise", () => {
+    const remote = { ...latest, categories: [{ id: "a", name: "Meals" }] };
+    expect(settingsToSave(remote, drawn, drawn, 100).categories).toEqual(remote.categories);
+    const mine = [{ id: "a", name: "Eating" }];
+    expect(settingsToSave(remote, drawn, { ...drawn, categories: mine }, 100).categories).toEqual(mine);
+  });
+  it("a first rate gets a date even when unchanged", () => {
+    expect(settingsToSave({ ...latest, rateSetAt: 0 }, drawn, drawn, 100).rateSetAt).toBe(100);
+  });
+});
+
+describe("entries saved before the real rate was known", () => {
+  it("a yuan entry keeps its yuan and gets the right dollars", () => {
+    const e = withRealRate({ id: "a", amount: 12.8, currency: "RMB", rate: 6.7, rmb: 12.8, usd: 1.91, rateGuess: true, reason: "Lunch" }, 7.1);
+    expect(e).toEqual({ id: "a", amount: 12.8, currency: "RMB", rate: 7.1, rmb: 12.8, usd: 1.8, reason: "Lunch" });
+  });
+  it("a dollar entry keeps its dollars and gets the right yuan", () => {
+    expect(withRealRate({ amount: 10, currency: "USD", rate: 6.7, rmb: 67, usd: 10, rateGuess: true }, 7.1)).toEqual({ amount: 10, currency: "USD", rate: 7.1, rmb: 71, usd: 10 });
   });
 });
 
