@@ -957,3 +957,10 @@ select.input { padding-right: 34px; background-image: url("data:image/svg+xml,%3
 
 /* Light / dark switch eases instead of flashing */
 .theme-fade, .theme-fade *, .theme-fade *::before, .theme-fade *::after { transition: background-color .28s ease, color .28s ease, border-color .28s ease, fill .28s ease, stroke .28s ease, box-shadow .28s ease !important; }
+
+/* Go-to-date calendar sheet */
+.cal-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cal-nav .icon-btn { background: var(--surface-2); box-shadow: none; font-size: 22px; line-height: 1; }
+.cal-nav .icon-btn:disabled { opacity: .35; }
+.cal-month { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
+#csheet .cal .day { min-height: 52px; }

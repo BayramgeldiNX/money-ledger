@@ -429,7 +429,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   let lastFocus = null, lockY = 0;
   // Holds the page still behind an open sheet and puts it back where it was on close
   function syncSheetLock() {
-    const open = !$("sheet").hidden || !$("dsheet").hidden, body = document.body;
+    const open = !$("sheet").hidden || !$("dsheet").hidden || !$("csheet").hidden, body = document.body;
     if (open === body.classList.contains("sheet-open")) return;
     if (open) { lockY = window.scrollY; body.style.top = -lockY + "px"; body.classList.add("sheet-open"); }
     else { body.classList.remove("sheet-open"); body.style.top = ""; window.scrollTo(0, lockY); }
@@ -1388,7 +1388,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     box.innerHTML = html;
     bindEntries(box);
     // the first rows of a list you have just arrived at come in one after another; later redraws stay still
-    const listKey = [state.month, sel, state.catFilter, everywhere].join("|");
+    // picking a day is not "arriving": the iPhone date wheel reports every turn, and the list must not restart each time
+    const listKey = [state.month, state.catFilter, everywhere].join("|");
     if (staggerPending || listKey !== lastListKey) { staggerRows(box); staggerPending = false; lastListKey = listKey; }
     swipe.prepare();
     if (state.justAdded && box.querySelector(".entry.fresh")) state.justAdded = null;
@@ -2429,6 +2430,42 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if ($("sheet").hidden) { $("scrim").hidden = true; $("scrim").style.opacity = ""; }
     syncSheetLock();
   }
+  // ---------- Go-to-date calendar (our own, so it matches the app instead of the system date picker) ----------
+  let calKey = null;
+  function renderCalSheet() {
+    const key = calKey, n = daysIn(key), [y, m] = key.split("-").map(Number), lead = (new Date(y, m - 1, 1).getDay() + 6) % 7, today = todayISO();
+    const byDay = {};
+    statsFor(key).list.forEach((e) => { byDay[e.date] = (byDay[e.date] || 0) + R(e); });
+    const max = Math.max(1, ...Object.values(byDay));
+    let cells = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"].map((d) => '<div class="wd">' + d + "</div>").join("") + "<span></span>".repeat(lead);
+    for (let d = 1; d <= n; d++) {
+      const iso = key + "-" + pad(d), v = byDay[iso] || 0, h = v > 0 ? Math.round(10 + 72 * Math.sqrt(v / max)) : 0, future = iso > today;
+      cells += '<button type="button" class="day' + (h >= 50 ? " hot" : "") + (iso === today ? " today" : "") + (iso === state.selDay ? " sel" : "") + (future ? " future" : "") + '" data-d="' + iso + '" style="--h:' + h + '%"' + (future ? " disabled" : "") +
+        ' aria-label="' + esc(dayLabel(iso)) + ": " + rmb0(v) + '"><span class="n">' + d + '</span><span class="a">' + (v > 0 ? compactRmb(v) : "&nbsp;") + "</span></button>";
+    }
+    $("c-grid").innerHTML = cells;
+    $("c-label").textContent = monthName(key, { month: "long" });
+    $("c-next").disabled = key >= curMonth();
+    $("c-clear").hidden = !state.selDay;
+    $("c-grid").querySelectorAll(".day[data-d]").forEach((b) => (b.onclick = () => { closeCalSheet(); goToDate(b.dataset.d); }));
+  }
+  function openCalSheet() {
+    lastFocus = document.activeElement;
+    calKey = state.selDay ? state.selDay.slice(0, 7) : state.month;
+    renderCalSheet();
+    const sh = $("csheet");
+    sh.style.transform = ""; sh.style.transition = "";
+    clearGhosts();
+    $("scrim").hidden = false; sh.hidden = false; sh.scrollTop = 0;
+    syncSheetLock();
+  }
+  function closeCalSheet() {
+    slideAway($("csheet"), true);
+    $("csheet").hidden = true; $("csheet").style.transform = "";
+    $("scrim").style.opacity = ""; $("scrim").hidden = true;
+    syncSheetLock();
+    if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+  }
   async function saveDebt(ev) {
     ev.preventDefault();
     const msg = $("d-msg"), person = $("d-person").value.trim(), amount = parseAmt($("d-amount").value);
@@ -2735,8 +2772,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       $("d-due").value = isoOf(new Date(y, m - 1, d + n));
     }));
     $("sheet-close").onclick = closeSheet;
-    $("scrim").onclick = () => { if (!$("dsheet").hidden) closeDebtSheet(); if (!$("sheet").hidden) closeSheet(); };
-    document.addEventListener("keydown", (ev) => { if (ev.key !== "Escape") return; if (!$("dsheet").hidden) closeDebtSheet(); else if (!$("sheet").hidden) closeSheet(); });
+    $("scrim").onclick = () => { if (!$("csheet").hidden) closeCalSheet(); if (!$("dsheet").hidden) closeDebtSheet(); if (!$("sheet").hidden) closeSheet(); };
+    document.addEventListener("keydown", (ev) => { if (ev.key !== "Escape") return; if (!$("csheet").hidden) closeCalSheet(); else if (!$("dsheet").hidden) closeDebtSheet(); else if (!$("sheet").hidden) closeSheet(); });
     $("f-delete").onclick = async () => {
       const d = $("f-delete");
       if (!d.classList.contains("armed")) { d.classList.add("armed"); d.textContent = "Tap again to delete"; delTimer = setTimeout(disarmDelete, 4000); return; }
@@ -2755,9 +2792,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (await saveBills(state.config.bills.concat([b]), "Repeats on the " + ordinal(day) + " of every month")) closeSheet();
     };
     document.querySelectorAll(".tabs button").forEach((b) => (b.onclick = () => setView(b.dataset.view)));
-    const j = $("jump");
-    j.addEventListener("click", (ev) => { try { j.showPicker(); ev.preventDefault(); } catch (e) {} });
-    j.addEventListener("change", () => goToDate(j.value));
+    $("date-btn").onclick = openCalSheet;
+    $("csheet-close").onclick = closeCalSheet;
+    $("c-prev").onclick = () => { calKey = shiftMonth(calKey, -1); renderCalSheet(); };
+    $("c-next").onclick = () => { calKey = shiftMonth(calKey, 1); renderCalSheet(); };
+    $("c-clear").onclick = () => { closeCalSheet(); clearDay(); renderHome(); };
     $("search-btn").onclick = () => {
       if ($("search-row").hidden) {
         $("search-row").hidden = false; $("search-btn").setAttribute("aria-pressed", "true");
@@ -2834,6 +2873,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     setInterval(checkNewDay, 60000);
     enableSheetSwipe("sheet", closeSheet);
     enableSheetSwipe("dsheet", closeDebtSheet);
+    enableSheetSwipe("csheet", closeCalSheet);
   }
   init();
 })();

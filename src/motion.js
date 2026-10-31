@@ -29,7 +29,7 @@ export function rollNumber(el, text, opts = {}) {
   const id = opts.id;
   let prev = id != null && id in lastText ? lastText[id] : "";
   if (id != null) {
-    if (text === prev && Date.now() - (lastAt[id] || 0) < 1000) prev = lastFrom[id];
+    if (text === prev && Date.now() - (lastAt[id] || 0) < 450) prev = lastFrom[id];
     else if (text !== prev) { lastFrom[id] = prev; lastAt[id] = Date.now(); }
     lastText[id] = text;
   }
