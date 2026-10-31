@@ -4,6 +4,7 @@
 // passcode, which is why turning the lock on needs a signed-in account.
 import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
+import { reduced, sleep } from "./motion.js";
 
 const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails";
 const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } };
@@ -69,12 +70,27 @@ function makePad(host, { title, left, length, onPin }) {
     '<div class="pin-msg" role="status"></div><div class="pin-keys">' + [1, 2, 3, 4, 5, 6, 7, 8, 9].map(key).join("") +
     left + key(0) + '<button type="button" class="pin-key plain" data-del aria-label="Delete">' + DELETE_ICON + '</button></div>';
   const row = host.querySelector(".pin-dots"), msg = host.querySelector(".pin-msg"), head = host.querySelector(".pin-title");
-  const paint = () => { row.innerHTML = Array.from({ length: length() }, (_, i) => '<span' + (i < digits.length ? ' class="on"' : "") + '></span>').join(""); };
+  // the dots are drawn once and only switched on or off, so each new digit's dot springs in by itself
+  const paint = () => {
+    const n = length(), tick = row.querySelector(".pin-ok");
+    if (tick) tick.remove();
+    row.classList.remove("ok");
+    if (row.querySelectorAll("span").length !== n) row.innerHTML = Array.from({ length: n }, () => "<span></span>").join("");
+    row.querySelectorAll("span").forEach((s, i) => s.classList.toggle("on", i < digits.length));
+  };
   const pad = {
     title: (text) => { head.textContent = text; },
     say: (text) => { msg.textContent = text; },
     reset: () => { digits = ""; busy = false; paint(); },
     shake: () => { row.classList.remove("shake"); void row.offsetWidth; row.classList.add("shake"); },
+    // right passcode: the dots fold away and a check draws in their place
+    ok: async () => {
+      if (reduced()) return;
+      row.classList.add("ok");
+      await sleep(180);
+      row.insertAdjacentHTML("beforeend", '<svg class="pin-ok" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5"/></svg>');
+      await sleep(420);
+    },
   };
   pad.title(title);
   paint();
@@ -161,11 +177,17 @@ function showCover() {
   const fresh = !cover;
   if (fresh) buildCover();
   if (fresh || cover.hidden) showUnlockChoices();
+  cover.classList.remove("lift");
   cover.hidden = false;
 }
 function openApp() {
   locked = false;
-  if (cover) { cover.hidden = true; showUnlockChoices(); }
+  if (!cover) return;
+  const c = cover;
+  if (reduced()) { c.hidden = true; showUnlockChoices(); return; }
+  // the screen lifts away; if the app locked again meanwhile, leave it covered
+  c.classList.add("lift");
+  setTimeout(() => { c.classList.remove("lift"); if (locked) return; c.hidden = true; showUnlockChoices(); }, 420);
 }
 
 async function unlock() {
@@ -184,7 +206,7 @@ async function unlock() {
 
 async function usePasscode(pin) {
   const problem = await tryPasscode(pin);
-  if (!problem) { openApp(); return; }
+  if (!problem) { await pad.ok(); openApp(); return; }
   pad.say(problem);
   pad.shake();
   pad.reset();
