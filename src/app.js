@@ -1,4 +1,5 @@
 import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
+import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, sleep as wait } from "./motion.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -349,13 +350,19 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   let errMsg = "";
   function showError(msg) { errMsg = msg; renderBanners(); }
+  // when the last waiting change has been sent, a quick "saved" note shows for a moment
+  let hadPending = false, syncedAt = 0;
   function renderBanners() {
     let html = "";
+    const pending = state.mode === "db" && outbox.length > 0;
+    if (hadPending && !pending && state.mode === "db" && !errMsg) { syncedAt = Date.now(); setTimeout(renderBanners, 1850); }
+    hadPending = pending;
     if (errMsg) html += '<div class="banner warn"><span class="grow">' + esc(errMsg) + "</span></div>";
+    if (syncedAt && !pending && Date.now() - syncedAt < 1800) html += '<div class="banner synced" style="--sd:-' + (Date.now() - syncedAt) + 'ms"><svg class="synced-ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 18a4 4 0 0 1-.6-7.95A5.5 5.5 0 0 1 17 9.5a4.25 4.25 0 0 1 0 8.5z"/><path d="M9.5 13.5l2 2 3.5-3.5"/></svg><span class="grow">All saved to your account</span></div>';
     if (state.mode === "db" && outbox.length) {
       const n = outbox.filter((o) => !o.path.startsWith("billruns/")).length || outbox.length;
       const what = n + (n === 1 ? " change" : " changes");
-      html += '<div class="banner sync"><span class="sync-dot' + (syncState === "syncing" ? " spin" : "") + '"></span><span class="grow">' +
+      html += '<div class="banner sync"><span class="sync-dot' + (syncState === "syncing" ? " spin" : syncState === "error" ? "" : " off") + '"></span><span class="grow">' +
         (syncState === "syncing" ? "Sending " + what + " to your account…" :
           syncState === "error" ? "<strong>" + what + "</strong> saved on this device. Could not reach your account, trying again shortly." :
           "<strong>Offline.</strong> " + what + " saved on this device. " + (n === 1 ? "It" : "They") + " will be sent when you are back online.") +
@@ -381,9 +388,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     };
   }
   let toastTimer = null;
+  // motion state for the Home list: a fresh arrival staggers its rows, and swipe rows are wrapped after each draw
+  let staggerPending = true, lastListKey = null, swipe = { prepare() {} };
   function toast(msg, plain, action) {
     const t = $("toast");
-    t.innerHTML = (plain ? "" : '<span class="check">✓</span>') + "<span>" + esc(msg) + "</span>" + (action ? '<button type="button" class="toast-act" id="toast-act">' + esc(action.label) + "</button>" : "");
+    t.innerHTML = (plain ? "" : '<span class="check">✓</span>') + "<span>" + esc(msg) + "</span>" + (action ? '<button type="button" class="toast-act" id="toast-act">' + esc(action.label) + '</button><i class="toast-bar"></i>' : "");
     t.hidden = false;
     t.style.animation = "none"; void t.offsetWidth; t.style.animation = "";
     if (action) $("toast-act").onclick = () => { t.hidden = true; action.fn(); };
@@ -399,6 +408,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       } else state.settingsDirty = false;
     }
     const changed = state.view !== v;
+    if (changed && v === "home") staggerPending = true;
     state.view = v;
     ["home", "report", "wallets", "debts", "limits", "settings"].forEach((k) => { $("v-" + k).hidden = k !== v; $("t-" + k).setAttribute("aria-selected", String(k === v)); });
     const wide = v !== "home";
@@ -522,27 +532,32 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // iPhone: drag the form down to close it, like a native sheet
   function enableSheetSwipe(sheetId, close) {
     const sh = $(sheetId || "sheet"), closeFn = close || closeSheet;
-    let sy = null, dy = 0;
+    let sy = null, dy = 0, vy = 0, ly = 0, lt = 0;
+    const SPRING = "transform .42s cubic-bezier(.32, .72, 0, 1)";
     sh.addEventListener("touchstart", (e) => {
       if (window.innerWidth > 640 || sh.scrollTop > 0 || e.target.closest("input, select, textarea")) { sy = null; return; }
-      sy = e.touches[0].clientY; dy = 0; sh.style.transition = "none";
+      sy = ly = e.touches[0].clientY; lt = e.timeStamp; dy = 0; vy = 0; sh.style.transition = "none";
     }, { passive: true });
     sh.addEventListener("touchmove", (e) => {
       if (sy == null) return;
-      dy = Math.max(0, e.touches[0].clientY - sy);
+      const y = e.touches[0].clientY;
+      if (e.timeStamp > lt) vy = (y - ly) / (e.timeStamp - lt);
+      ly = y; lt = e.timeStamp;
+      dy = Math.max(0, y - sy);
       sh.style.transform = dy ? "translateY(" + dy + "px)" : "";
       $("scrim").style.opacity = String(Math.max(0.2, 1 - dy / 400));
     }, { passive: true });
     sh.addEventListener("touchend", () => {
       if (sy == null) return;
-      sy = null; sh.style.transition = "transform .2s ease-out"; $("scrim").style.opacity = "";
-      if (dy > 110) { sh.style.transform = "translateY(100%)"; setTimeout(closeFn, 190); }
-      else sh.style.transform = "";
+      sy = null; $("scrim").style.opacity = "";
+      // a quick flick down closes it even over a short distance; otherwise it springs back
+      if (dy > 110 || (dy > 30 && vy > 0.6)) { sh.style.transition = "transform .22s ease-out"; sh.style.transform = "translateY(100%)"; setTimeout(closeFn, 190); }
+      else { sh.style.transition = SPRING; sh.style.transform = ""; }
     });
     // iOS can cancel a touch (a system gesture, a call): spring back instead of staying half-dragged
     sh.addEventListener("touchcancel", () => {
       if (sy == null) return;
-      sy = null; sh.style.transition = "transform .2s ease-out"; $("scrim").style.opacity = ""; sh.style.transform = "";
+      sy = null; sh.style.transition = SPRING; $("scrim").style.opacity = ""; sh.style.transform = "";
     });
   }
   function closeSheet() {
@@ -902,7 +917,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     state.form.method = DEFAULT_METHOD;
     $("smart").hidden = false; $("smart-in").value = ""; $("smart-msg").textContent = ""; $("smart-file").value = "";
     $("f-delete").hidden = true; $("f-repeat").hidden = true;
-    $("f-submit").textContent = "Save";
+    $("f-submit").classList.remove("saved"); $("f-submit").textContent = "Save";
     $("more").open = false;
     $("f-msg").textContent = "";
     disarmDelete();
@@ -927,15 +942,20 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       '<div class="form-msg" id="lf-msg"></div>' +
       '<div class="lf-btns"><button type="button" class="btn primary" id="lf-save">' + (l ? "Save changes" : "Add limit") + '</button><button type="button" class="btn" id="lf-cancel">Cancel</button>' + (l ? '<button type="button" class="btn danger" id="lf-del">Delete</button>' : "") + "</div></div>";
   }
+  // Past 90% a limit's bar turns red; it pulses once per limit period, the first time you see it, then just stays red
+  const limPulsed = new Set();
+  let limRingOff = null;
   function limitCardHTML(l) {
     const today = todayISO(), r = limRange(l, today), sp = limSpent(l, today), over = sp > l.amount, near = !over && sp >= l.amount * 0.8;
+    const hot = !over && sp >= l.amount * 0.9, hotKey = l.id + "|" + r.start, pulse = hot && !limPulsed.has(hotKey);
+    if (pulse) limPulsed.add(hotKey);
     const left = Math.round((new Date(r.end + "T12:00") - new Date(today + "T12:00")) / 864e5);
     const items = limEntries(l, today).sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0)));
     const c0 = catById(l.cats[0]), next = l.period === "week" ? dayShort(addDays(r.end, 1)) : monthName(shiftMonth(today.slice(0, 7), 1), { month: "long" }) + " 1";
     return '<div class="card stack lim-card"><div class="lim-head">' + tile(c0, "tile sm") + '<span class="lh-t"><b>' + esc(limName(l)) + "</b><small>Every " + limWord(l) + " · " + esc(listJoin(l.cats.map((id) => catById(id).name))) + '</small></span><button type="button" class="btn small" data-lim-edit="' + esc(l.id) + '">Edit</button></div>' +
       '<div><div class="lim-big' + (over ? " up" : "") + '">' + rmb0(sp) + " <small>of " + rmb0(l.amount) + "</small></div>" +
       '<div class="lim-usd">' + usd(sp / state.config.rate) + " of " + usd(l.amount / state.config.rate) + "</div>" +
-      '<div class="track" style="margin-top:10px"><div class="fill' + (over ? " over" : near ? " warn" : "") + '" style="width:' + Math.min((sp / l.amount) * 100, 100) + '%"></div></div>' +
+      '<div class="track" style="margin-top:10px"><div class="fill' + (over ? " over" : hot ? " hot" + (pulse ? " pulse" : "") : near ? " warn" : "") + '" style="width:' + Math.min((sp / l.amount) * 100, 100) + '%"></div></div>' +
       '<div class="lim-row"><span class="' + (over ? "up" : near ? "warn-t" : "down") + '" style="font-weight:800">' + (over ? rmb0(sp - l.amount) + " over" : rmb0(l.amount - sp) + " left") + ' <span class="lim-usd-s">' + usd(Math.abs(l.amount - sp) / state.config.rate) + '</span></span><span class="muted">' + esc(dayShort(r.start) + " – " + dayShort(r.end)) + " · " + (left === 0 ? "last day" : left + (left === 1 ? " day" : " days") + " to go") + "</span></div></div>" +
       (over ? '<div class="lim-note">You have used this ' + limWord(l) + "'s money for " + esc(limName(l).toLowerCase()) + ". If something is not urgent, wait until <b>" + esc(next) + "</b>" + (l.period === "month" ? " or put it on the waiting list" : "") + ".</div>" : near ? '<div class="lim-note">Almost at the limit. Only ' + rmb0(l.amount - sp) + " left this " + limWord(l) + ".</div>" : "") +
       (items.length ? '<div class="lim-items"><div class="hint" style="margin-bottom:2px">' + items.length + (items.length === 1 ? " entry" : " entries") + " this " + limWord(l) + '</div><div class="entries where-entries wk lim-ent">' + items.slice(0, 4).map((e) => entryHTML(e, "week")).join("") + "</div>" +
@@ -951,7 +971,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6)).map((d) => ({ d, v: foodOn(d) }));
       const logged = days.filter((x) => state.expenses.some((e) => e.date === x.d)), okDays = logged.filter((x) => x.v <= fl).length;
       html += '<div class="card stack"><div class="head"><h2>Food today</h2><span class="hint">' + esc(listJoin(state.config.foodCats.map((id) => catById(id).name))) + "</span></div>" +
-        '<div class="lim-top"><div class="ring ' + cls + '"><svg viewBox="0 0 92 92" aria-hidden="true"><circle class="bg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9"/><circle class="fg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - ratio)).toFixed(2) + '"/></svg><div class="center"><div class="v">' + rmb0(Math.abs(fl - f)) + '</div><div class="s">' + (over ? "over" : "left") + "</div></div></div>" +
+        '<div class="lim-top"><div class="ring ' + cls + '"><svg viewBox="0 0 92 92" aria-hidden="true"><circle class="bg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9"/><circle class="fg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - ratio)).toFixed(2) + '"/></svg><div class="center"><div class="v" data-v="' + Math.abs(fl - f) + '">' + rmb0(Math.abs(fl - f)) + '</div><div class="s">' + (over ? "over" : "left") + "</div></div></div>" +
         '<div><div class="lim-big' + (over ? " up" : "") + '">' + rmb0(f) + ' <small>of ' + rmb0(fl) + '</small></div><div class="lim-usd">' + usd(f / state.config.rate) + " of " + usd(fl / state.config.rate) + '</div><div class="hint">' + esc(dayShort(today)) + " · " + (over ? "over by " + rmb0(f - fl) + ". It starts fresh tomorrow." : "starts fresh every day.") + "</div></div></div>" +
         '<div class="lim-days">' + days.map((x) => { const p = Math.min(x.v / fl, 1.25) / 1.25 * 100, dt = new Date(x.d + "T12:00"); return '<div class="ld' + (x.v > fl ? " over" : "") + (x.d === today ? " now" : "") + '" title="' + esc(dayShort(x.d) + ": " + rmb0(x.v)) + '"><span class="ld-v">' + (x.v > 0 ? compactRmb(x.v) : "") + '</span><span class="ld-b"><i style="height:' + p + '%"></i><em style="bottom:' + (100 / 1.25) + '%"></em></span><span class="ld-l">' + esc(dt.toLocaleDateString("en-US", { weekday: "short" })) + "<b>" + dt.getDate() + "</b></span></div>"; }).join("") + "</div>" +
         (logged.length ? '<p class="hint" style="margin:0">' + esc(dayShort(days[0].d)) + " – " + esc(dayShort(today)) + ": under the limit on <b>" + okDays + " of " + logged.length + "</b> days you logged.</p>" : "") + "</div>";
@@ -962,7 +982,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     html += '<div class="lim-sec"><h2>Your limits</h2>' + (state.limEdit ? "" : '<button type="button" class="btn small primary" id="lim-add">+ Add a limit</button>') + "</div>";
     if (state.limEdit && !state.limEdit.id) html += limitFormHTML();
     lims.forEach((l) => { html += state.limEdit && state.limEdit.id === l.id ? limitFormHTML() : limitCardHTML(l); });
-    if (!lims.length && !state.limEdit) html += '<div class="card empty-state"><h3>No limits yet</h3>Add one for any section, for example Shopping ¥300 a month or Health ¥100 a week. The app warns you before you go over.</div>';
+    if (!lims.length && !state.limEdit) html += '<div class="card empty-state">' + emptyArt("gauge") + '<h3>No limits yet</h3>Add one for any section, for example Shopping ¥300 a month or Health ¥100 a week. The app warns you before you go over.</div>';
     // 3. Waiting list
     const lat = state.config.later || [];
     const due = lat.filter((x) => x.forMonth && x.forMonth <= key), wait = lat.filter((x) => !(x.forMonth && x.forMonth <= key));
@@ -973,6 +993,17 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       (!lat.length ? '<p class="hint" style="margin:0">When a buy would go over a monthly limit, the add form offers <b>Wait for next month</b>. It lands here, and on the 1st you decide if you still need it.</p>' : "") + "</div>";
     html += '<button type="button" class="link-btn" id="lim-settings" style="align-self:center">Change the daily food limit in Settings →</button>';
     el.innerHTML = html;
+    // the food ring sweeps to today's level and its number counts up with it
+    const rfg = el.querySelector(".lim-top .ring .fg");
+    if (rfg) {
+      const to = Number(rfg.getAttribute("stroke-dashoffset")), from = limRingOff == null ? Number(rfg.getAttribute("stroke-dasharray")) : limRingOff;
+      limRingOff = to;
+      if (!reduceMotion() && Math.abs(from - to) > 0.5) requestAnimationFrame(() => {
+        rfg.style.transition = "none"; rfg.style.strokeDashoffset = from; void rfg.getBoundingClientRect();
+        requestAnimationFrame(() => { rfg.style.transition = ""; rfg.style.strokeDashoffset = to; });
+      });
+      const rv = el.querySelector(".lim-top .ring .v"); if (rv) countUp(rv, "lim-ring", Number(rv.dataset.v), rmb0);
+    }
     el.querySelectorAll("[data-later-buy]").forEach((b) => (b.onclick = () => buyLater(b.dataset.laterBuy)));
     el.querySelectorAll("[data-later-del]").forEach((b) => (b.onclick = () => removeLater(b.dataset.laterDel)));
     bindEntries(el);
@@ -1087,15 +1118,41 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     renderConvert();
     openSheet();
   }
+  // Deleting an entry (from the sheet, or by swiping its row) always offers Undo, and the restored row slides back in.
+  // With `rethrow` a failure goes back to the caller (the sheet shows its own message); otherwise it shows a toast.
+  async function deleteEntry(id, rethrow) {
+    const old = state.expenses.find((x) => x.id === id);
+    const data = old ? Object.fromEntries(Object.entries(old).filter(([k]) => k !== "id")) : null;
+    try {
+      await store.remove(id);
+      toast("Deleted", false, data ? { label: "Undo", fn: async () => { try { state.justAdded = id; await store.addWithId(id, data); toast("Restored"); } catch (err) { toast("Could not restore.", true); } } } : null);
+    } catch (e) {
+      if (rethrow) throw e;
+      toast("Could not delete. Try again.", true);
+      renderAll();
+    }
+  }
   let delTimer = null;
   function disarmDelete() { const d = $("f-delete"); d.classList.remove("armed"); d.textContent = "Delete"; clearTimeout(delTimer); }
 
+  // A wrong amount shakes; a saved entry turns the Save button into a check for a moment before the sheet leaves
+  function shakeAmount() {
+    const l = $("f-amount").closest(".amount-line"); if (!l) return;
+    l.classList.remove("bad"); void l.offsetWidth; l.classList.add("bad");
+    setTimeout(() => l.classList.remove("bad"), 700);
+  }
+  async function savedCheck(btn) {
+    if (reduceMotion()) return;
+    btn.classList.add("saved");
+    btn.innerHTML = '<svg class="save-check" viewBox="0 0 24 24" aria-hidden="true"><path pathLength="1" d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+    await wait(300);
+  }
   async function submitForm(ev) {
     ev.preventDefault();
     const msg = $("f-msg");
     const amount = parseAmt($("f-amount").value);
     const income = state.form.type === "income";
-    if (!(round2(amount) > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; $("f-amount").focus(); return; }
+    if (!(round2(amount) > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; shakeAmount(); $("f-amount").focus(); return; }
     if (!state.form.cat) { msg.textContent = income ? "Pick where the money came from." : "Pick what it was for."; return; }
     const date = $("f-date").value || todayISO();
     if (!saneDate(date)) { $("more").open = true; msg.textContent = "Check the date. The year looks wrong."; return; }
@@ -1117,11 +1174,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (isRateGuess(existing)) e.rateGuess = true;
     const btn = $("f-submit"); btn.disabled = true;
     try {
-      if (existing) { await store.update(existing.id, e); state.justAdded = existing.id; closeSheet(); toast("Changes saved"); }
+      if (existing) { await store.update(existing.id, e); await savedCheck(btn); state.justAdded = existing.id; closeSheet(); toast("Changes saved"); }
       else {
         const id = await store.add(e);
+        await savedCheck(btn);
         state.justAdded = id;
-        
         closeSheet();
         toast(savedText(e, id), false, id ? { label: "Undo", fn: async () => { try {
           await store.remove(id);
@@ -1134,6 +1191,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         if (date.slice(0, 7) !== state.month) state.month = date.slice(0, 7);
       }
       renderAll(); popSummary();
+      // the amount shows beside the total for a moment, so you see what it did
+      if (!existing && state.view === "home") spendTick($("summary").firstElementChild, (income ? "+" : "−") + rmbS(cur === "RMB" ? e.amount : R(e)), income);
     } catch (err) {
       msg.textContent = err && err.code === "quota_exceeded" ? "Storage is full. Delete old entries to add more." : "Could not save. Check your connection and try again.";
     } finally { btn.disabled = false; }
@@ -1200,7 +1259,10 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("summary").innerHTML = html;
     // count the big number from what was shown before, and sweep the food ring to its new level
     const big = $("summary").querySelector(".big");
-    if (big) countUp(big, bigKey, bigVal, rmb0);
+    if (big) rollNumber(big, rmb0(bigVal), { id: bigKey });
+    // the dollar line follows the yuan one a beat later
+    const sub = $("summary").querySelector(".usd-line");
+    if (sub) rollNumber(sub, sub.textContent, { id: bigKey + "-usd", delay: 60 });
     const fg = $("summary").querySelector(".ring .fg");
     if (fg) {
       const to = Number(fg.getAttribute("stroke-dashoffset")), from = Number(fg.dataset.from);
@@ -1314,11 +1376,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const found = src.filter((e) => typeof e.date === "string" && (!sel || e.date === sel) && (!state.catFilter || e.cat === state.catFilter) && (!q || ((e.reason || "") + " " + (e.note || "") + " " + catById(e.cat).name + " " + (e.method || "")).toLowerCase().includes(q)));
     const list = found.slice().sort((a, b) => (b.date < a.date ? -1 : b.date > a.date ? 1 : (b.createdAt || 0) - (a.createdAt || 0))).slice(0, 400);
     const box = $("month-list");
-    if (!state.loaded) { box.innerHTML = '<div class="empty-state">Loading…</div>'; return; }
+    if (!state.loaded) { box.innerHTML = skeletonRows(); return; }
     if (!list.length) {
-      box.innerHTML = sel && !q && !state.catFilter ? '<div class="empty-state"><h3>Nothing spent on this day</h3>A day with no spending. Nice.</div>'
-        : q || state.catFilter || s.count || everywhere ? '<div class="empty-state"><h3>No matches</h3>' + (everywhere ? "Nothing found in any month." : 'Nothing this month. Try "All months".') + "</div>"
-        : '<div class="empty-state"><h3>Nothing here yet</h3>Tap the + button to add your first expense for ' + esc(monthName(state.month, { month: "long" })) + ".</div>";
+      box.innerHTML = sel && !q && !state.catFilter ? '<div class="empty-state">' + emptyArt("wallet") + '<h3>Nothing spent on this day</h3>A day with no spending. Nice.</div>'
+        : q || state.catFilter || s.count || everywhere ? '<div class="empty-state">' + emptyArt("search") + '<h3>No matches</h3>' + (everywhere ? "Nothing found in any month." : 'Nothing this month. Try "All months".') + "</div>"
+        : '<div class="empty-state">' + emptyArt("wallet") + '<h3>Nothing here yet</h3>Tap the + button to add your first expense for ' + esc(monthName(state.month, { month: "long" })) + ".</div>";
       return;
     }
     let html = "", day = null, group = [];
@@ -1338,6 +1400,10 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     flush();
     box.innerHTML = html;
     bindEntries(box);
+    // the first rows of a list you have just arrived at come in one after another; later redraws stay still
+    const listKey = [state.month, sel, state.catFilter, everywhere].join("|");
+    if (staggerPending || listKey !== lastListKey) { staggerRows(box); staggerPending = false; lastListKey = listKey; }
+    swipe.prepare();
     if (state.justAdded && box.querySelector(".entry.fresh")) state.justAdded = null;
   }
 
@@ -1421,7 +1487,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
 
   function bindMode(el) {
-    el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { state.reportMode = b.dataset.mode; pref.set("reportMode", b.dataset.mode); syncMonthSwitch(); renderReport(); }));
+    // moving between Day / Week / Month / Year: bars that exist on both screens glide to their new size instead of redrawing
+    el.querySelectorAll("[data-mode]").forEach((b) => (b.onclick = () => { const snap = snapshotBars(el); state.reportMode = b.dataset.mode; pref.set("reportMode", b.dataset.mode); syncMonthSwitch(); renderReport(); morphBars(el, snap); }));
+    scrubBars(el);
     el.querySelectorAll("[data-goto-month]").forEach((b) => (b.onclick = () => { state.month = b.dataset.gotoMonth; state.reportMode = "month"; renderAll(); window.scrollTo({ top: 0 }); }));
     el.querySelectorAll(".cal .day[data-d]").forEach((b) => (b.onclick = () => { state.repDay = state.repDay === b.dataset.d ? null : b.dataset.d; renderReport(); }));
     el.querySelectorAll("[data-see-cat]").forEach((b) => (b.onclick = () => { state.catFilter = b.dataset.seeCat; state.homeView = "list"; state.selDay = null; setView("home"); }));
@@ -1848,7 +1916,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const el = $("v-report");
     const animKey = state.reportMode + "|" + (state.reportMode === "week" ? weekStart() : state.reportMode === "day" ? dayOf() : key);
     const toggle = '<div class="mode-row on-bg"><div class="seg" role="group" aria-label="Report period"><button type="button" data-mode="day" aria-pressed="' + (state.reportMode === "day") + '">Day</button><button type="button" data-mode="week" aria-pressed="' + (state.reportMode === "week") + '">Week</button><button type="button" data-mode="month" aria-pressed="' + (state.reportMode === "month") + '">Month</button><button type="button" data-mode="year" aria-pressed="' + (state.reportMode === "year") + '">Year</button></div></div>';
-    if (!state.loaded) { el.innerHTML = '<div class="card empty-state">Loading…</div>'; return; }
+    if (!state.loaded) { el.innerHTML = '<div class="card">' + skeletonRows(4) + "</div>"; return; }
     if (state.reportMode === "year") { el.innerHTML = toggle + yearHTML(); bindMode(el); heroCount(el); playOnView(el, animKey); return; }
     if (state.reportMode === "day") { el.innerHTML = toggle + dayReportHTML(); bindMode(el); bindDay(el); bindRunCharts(el); bindEntries(el); heroCount(el); playOnView(el, animKey); return; }
     if (state.reportMode === "week") { el.innerHTML = toggle + weekReportHTML(); bindMode(el); bindWeek(el); bindRunCharts(el); bindEntries(el); heroCount(el); playOnView(el, animKey); return; }
@@ -1947,7 +2015,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
   function renderWallets() {
     const el = $("v-wallets"), ws = state.config.wallets;
-    if (!state.configLoaded) { el.innerHTML = '<div class="card empty-state">Loading…</div>'; return; }
+    if (!state.configLoaded) { el.innerHTML = '<div class="card">' + skeletonRows(4) + "</div>"; return; }
     if (!ws || !ws.length) {
       el.innerHTML = '<div class="card stack"><div class="head"><h2>Set up your wallets</h2></div>' +
         '<p class="hint" style="margin:0">Type how much money is in each one right now. After that the app keeps them up to date: paying with WeChat Pay lowers WeChat, income received in Alipay raises Alipay, and so on. Leave 0 for any you do not use.</p>' +
@@ -1978,7 +2046,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const mIn = moves.filter((m) => m.amt > 0 && (m.date || "").slice(0, 7) === mk).reduce((a, m) => a + m.amt, 0), mOut = moves.filter((m) => m.amt < 0 && (m.date || "").slice(0, 7) === mk).reduce((a, m) => a - m.amt, 0);
       const others = ws.filter((x) => x.id !== w.id);
       return '<details class="wallet" data-wid="' + esc(w.id) + '"' + (state.openWallets[w.id] ? " open" : "") + "><summary>" + wTile(w) +
-        '<span style="min-width:0"><div class="wname">' + esc(w.name) + '</div><div class="wsub">' + (mOut || mIn ? "This month " + (mOut ? '<span class="out-amt">−' + wMoney(w, mOut) + "</span>" : "") + (mOut && mIn ? " · " : "") + (mIn ? '<span class="inc-amt">+' + wMoney(w, mIn) + "</span>" : "") : "No changes this month") + '</div></span><span class="wbal' + (b < 0 ? " out-amt" : "") + '">' + wMoney(w, b) + '<small class="usd" style="display:block;font-size:12px;font-weight:600">' + (wCur(w) === "USD" ? "≈ " + rmb0(wToRmb(w, b)) : usd(b / state.config.rate)) + "</small>" + "</span></summary>" +
+        '<span style="min-width:0"><div class="wname">' + esc(w.name) + '</div><div class="wsub">' + (mOut || mIn ? "This month " + (mOut ? '<span class="out-amt">−' + wMoney(w, mOut) + "</span>" : "") + (mOut && mIn ? " · " : "") + (mIn ? '<span class="inc-amt">+' + wMoney(w, mIn) + "</span>" : "") : "No changes this month") + '</div></span><span class="wbal' + (b < 0 ? " out-amt" : "") + '"><span class="wbm">' + wMoney(w, b) + '</span><small class="usd" style="display:block;font-size:12px;font-weight:600">' + (wCur(w) === "USD" ? "≈ " + rmb0(wToRmb(w, b)) : usd(b / state.config.rate)) + "</small>" + "</span></summary>" +
         '<div class="wallet-body">' +
         (moves.length ? "<div>" + moves.slice(0, 8).map((m) => '<div class="wmove"><span class="l"><span class="d">' + esc(m.date ? shortDate(m.date) : "") + "</span>" + esc(m.label) + '</span><b class="' + (m.amt < 0 ? "out-amt" : "inc-amt") + '">' + (m.amt < 0 ? "−" : "+") + wMoney(w, Math.abs(m.amt)) + "</b></div>").join("") + "</div>" : '<p class="hint" style="margin:0">No changes since you set the balance. Pay with ' + esc(w.methods[0] || w.name) + " and it shows here.</p>") +
         '<div class="hint">' + (wCur(w) === "USD" ? "Dollar wallet. " : "") + "Balance set to " + wMoney(w, w.balance) + " on " + esc(new Date(w.setAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })) + ".</div>" +
@@ -1992,6 +2060,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       '<p class="hint" style="margin:0">Choose $ for a dollar card or account. A new wallet also appears under "Paid with" when you add an expense. Credit card spending is not taken from a wallet.</p></div>';
     el.innerHTML = html;
     const t = $("w-total"); if (t) countUp(t, "w-total", total, rmb0);
+    // each wallet's balance rolls to its new value (a move between wallets shows on both)
+    el.querySelectorAll("details.wallet").forEach((d) => { const m = d.querySelector(".wbm"); if (m) rollNumber(m, m.textContent, { id: "wb-" + d.dataset.wid }); });
     // closing a wallet also closes any half-filled box inside it, so it opens clean next time
     el.querySelectorAll("details.wallet").forEach((d) => d.addEventListener("toggle", () => {
       state.openWallets[d.dataset.wid] = d.open;
@@ -2065,6 +2135,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         const id = "t" + uid(), tr = { from: w.id, to, amount: round2(amt), amountTo: round2(got), date: todayISO(), createdAt: Date.now() };
         try {
           await store.transferSet(id, tr);
+          // the amount travels from one wallet to the other (changing to the other currency on the way)
+          const balOf = (wid) => $("v-wallets").querySelector('details.wallet[data-wid="' + CSS.escape(wid) + '"] .wbal');
+          flyMoney(balOf(w.id), balOf(to), wMoney(w, amt), cross ? wMoney(dest, got) : "", w.color);
           toast("Moved " + wMoney(w, amt) + (cross ? " → " + wMoney(dest, got) : "") + " to " + (dest ? dest.name : "wallet"), false, { label: "Undo", fn: async () => { try { await store.transferDelete(id); toast("Undone", true); } catch (e) {} } });
         } catch (e) { toast("Could not save. Try again.", true); }
       };
@@ -2684,12 +2757,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const d = $("f-delete");
       if (!d.classList.contains("armed")) { d.classList.add("armed"); d.textContent = "Tap again to delete"; delTimer = setTimeout(disarmDelete, 4000); return; }
       const id = state.editId; disarmDelete();
-      const old = state.expenses.find((x) => x.id === id);
-      const data = old ? Object.fromEntries(Object.entries(old).filter(([k]) => k !== "id")) : null;
-      try {
-        await store.remove(id); closeSheet();
-        toast("Deleted", false, data ? { label: "Undo", fn: async () => { try { await store.addWithId(id, data); toast("Restored"); } catch (err) { toast("Could not restore.", true); } } } : null);
-      } catch (e) { $("f-msg").textContent = "Could not delete. Try again."; }
+      try { await deleteEntry(id, true); closeSheet(); } catch (e) { $("f-msg").textContent = "Could not delete. Try again."; }
     };
     $("smart-go").onclick = () => smartFill(null);
     $("smart-in").addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); smartFill(null); } });
@@ -2751,6 +2819,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("bk-file").addEventListener("change", () => { const f = $("bk-file").files && $("bk-file").files[0]; $("bk-file").value = ""; if (f) readBackup(f); });
     $("x-pdf").onclick = () => { $("x-msg").textContent = ""; makeStatement(state.month, $("x-pdf")); };
 
+    // motion: sliding highlights, sticky day headers, swipe rows, the light/dark ease
+    initThemeFade();
+    ["f-cats", "f-method", "d-wallet"].forEach((id) => glide($(id), ".chip"));
+    ["f-type", "f-kind", "d-dir"].forEach((id) => glide($(id)));
+    document.querySelectorAll(".cur-toggle").forEach((b) => glide(b));
+    glide($("tabs-wrap"), "button", "aria-selected");
+    watchStuck("month-list");
+    swipe = initSwipe($("month-list"), { onEdit: startEdit, onDelete: (id) => deleteEntry(id) });
     renderCatChips();
     updateMoreSummary();
     const v = pref.get("view", "home");
