@@ -406,6 +406,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     }
     const changed = state.view !== v;
     if (changed && v === "home") staggerPending = true;
+    // leaving Home puts its search, picked day and section filter away, so coming back shows the plain month
+    if (changed && state.view === "home") {
+      closeSearch(); clearDay();
+      state.catFilter = null; state.searchAll = false; $("search-all").setAttribute("aria-pressed", "false");
+    }
     state.view = v;
     ["home", "report", "wallets", "debts", "limits", "settings"].forEach((k) => { $("v-" + k).hidden = k !== v; $("t-" + k).setAttribute("aria-selected", String(k === v)); });
     const wide = v !== "home";
