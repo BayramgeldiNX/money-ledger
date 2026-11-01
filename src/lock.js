@@ -6,8 +6,8 @@ import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pin
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
 import { reduced, sleep } from "./motion.js";
 
-const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails";
-const read = (key) => { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } };
+const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails", LEFT_KEY = "ml.lock.left";
+const read =(key) => { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } };
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* stays off */ } };
 const savedCred = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
 const saveCred = (id) => { try { localStorage.setItem(KEY, id); } catch (e) { /* stays off */ } };
@@ -236,8 +236,25 @@ function lockNow() {
   unlock();
 }
 
+// An app update reloads the page, which would forget the unlock and ask for Face ID again. So the time it was
+// last open goes in sessionStorage (it survives a reload, not closing the app), under the same one-minute rule.
+function saveLeftAt() {
+  try {
+    if (locked || !savedCred()) sessionStorage.removeItem(LEFT_KEY);
+    else sessionStorage.setItem(LEFT_KEY, String(hiddenAt || Date.now()));
+  } catch (e) { /* it asks again */ }
+}
+function takeLeftAt() {
+  try {
+    const at = Number(sessionStorage.getItem(LEFT_KEY));
+    sessionStorage.removeItem(LEFT_KEY);
+    return at;
+  } catch (e) { return 0; }
+}
+
 // Runs before the app paints, so the money is never seen first.
 export async function startLock() {
+  window.addEventListener("pagehide", saveLeftAt);
   document.addEventListener("visibilitychange", () => {
     if (!savedCred()) return;
     if (document.hidden) { hiddenAt = Date.now(); showCover(); return; }
@@ -246,13 +263,20 @@ export async function startLock() {
     if (shouldRelock(away, Date.now())) lockNow(); else openApp();
   });
   if (!savedCred()) return;
-  locked = true;
-  showCover();
+  const left = takeLeftAt();
+  if (shouldRelock(left, Date.now())) {
+    locked = true;
+    showCover();
+  } else if (document.hidden) {
+    // reloaded in the background: the time away still counts from when the owner left
+    hiddenAt = left;
+    showCover();
+  }
   let user;
   try { user = await currentUser(); } catch (e) { console.error(e); }
   // Signed out: a forgotten passcode would have no way back, and the account's data is not on screen anyway.
   if (user === null) { clearLock(); openApp(); return; }
-  if (!document.hidden) unlock();
+  if (locked && !document.hidden) unlock();
 }
 
 // ---- The Face ID card in Settings. Only shown on an iPhone or iPad that can use it. ----
