@@ -2,7 +2,7 @@ import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compa
 import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, sleep as wait } from "./motion.js";
 import { initThemeSwitch } from "./theme.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
-import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem } from "./lib/ledger.js";
+import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
 (function () {
   "use strict";
@@ -241,11 +241,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         raw.debts = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         state.debtsLoaded = true;
         refreshFromQueue(); renderBackground();
+        fixGuessedRates();
       }, () => { state.debtsLoaded = true; });
       db.collection("expenses").onSnapshot((snap) => {
         raw.expenses = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         state.loaded = true;
         refreshFromQueue(); renderBackground();
+        fixGuessedRates();
         runBills();
       }, (err) => { showError("Your expenses could not load (" + (err && err.code) + "). Reload the page to try again."); });
       db.doc("config/main").onSnapshot((snap) => {
@@ -256,6 +258,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         if (!state.configLoaded) state.settingsDirty = false;
         state.configLoaded = true;
         refreshFromQueue(); renderBackground(true);
+        fixGuessedRates();
         runBills();
       }, () => { showError("Your settings could not load. Reload the page to try again."); });
       flushOutbox();
@@ -585,6 +588,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (b.type === "income") e.type = "income";
     return e;
   };
+  // Until the settings arrive, the rate is only the default. Anything saved with it is marked, and put right here once the real rate is known.
+  const isRateGuess = (old) => (old ? !!old.rateGuess : !state.configLoaded);
+  function fixGuessedRates() {
+    if (!store || !state.configLoaded) return;
+    const rate = state.config.rate;
+    state.expenses.filter((e) => e.rateGuess).forEach((e) => store.update(e.id, withRealRate(e, rate)));
+    state.debts.filter((d) => d.rateGuess).forEach((d) => { const { rateGuess, ...rest } = d; store.debtSet(d.id, { ...rest, rate }); });
+  }
   async function runBills() {
     if (!store || !state.loaded || !state.configLoaded || billsBusy || !state.config.bills.length) return;
     const key = curMonth(), today = Number(todayISO().slice(8, 10)), n = daysIn(key);
@@ -659,6 +670,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const rate = state.config.rate, cur = src.currency === "USD" ? "USD" : "RMB", amount = Number(src.amount);
     const e = { date: todayISO(), amount, currency: cur, rate, usd: round2(cur === "RMB" ? amount / rate : amount), rmb: round2(cur === "RMB" ? amount : amount * rate),
       cat: src.cat, kind: src.kind || catById(src.cat).kind, reason: src.reason, method: src.method || state.form.method, note: "", createdAt: Date.now() };
+    if (isRateGuess()) e.rateGuess = true;
     if (btn) btn.disabled = true;
     try {
       const id = await store.add(e);
@@ -1167,6 +1179,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     };
     if (income) e.type = "income";
     if (existing && existing.bill) { e.bill = true; e.billId = existing.billId; }
+    if (isRateGuess(existing)) e.rateGuess = true;
     const btn = $("f-submit"); btn.disabled = true;
     try {
       if (existing) { await store.update(existing.id, e); await savedCheck(btn); state.justAdded = existing.id; closeSheet(); toast("Changes saved"); }
@@ -2488,6 +2501,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       // a wallet chosen (or changed) now counts from now on; an unchanged one keeps its original moment
       wallet: dForm.wallet || "", walletAt: dForm.wallet ? (old && old.wallet === dForm.wallet ? old.walletAt || old.createdAt || Date.now() : Date.now()) : 0 };
     if (old && old.example) doc.example = true;
+    if (isRateGuess(old)) doc.rateGuess = true;
     if (doc.payments.reduce((a, p) => a + Number(p.amount), 0) >= doc.amount) { doc.settled = true; doc.settledAt = Date.now(); }
     $("d-save").disabled = true;
     try {
@@ -2501,7 +2515,14 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
 
   // ---------- Settings ----------
-  let draftCats = null;
+  let draftCats = null, settingsDrawn = {};
+  // the form's values in the shape they are saved in
+  function readSettingsForm() {
+    readCatRows(); readIncRows();
+    const food = parseAmt($("s-food").value);
+    return { rate: Math.round(parseRate($("s-rate").value) * 10000) / 10000, foodLimit: food > 0 ? round2(food) : 0,
+      incomeCats: draftIncs.map((c) => ({ ...c })), categories: draftCats.map((c) => ({ ...c })) };
+  }
   function renderSettings() {
     $("s-food").value = state.config.foodLimit || 0;
     const lc = (state.config.limits || []).length;
@@ -2514,6 +2535,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     draftIncs = state.config.incomeCats.map((c) => ({ id: c.id, name: c.name, color: c.color }));
     drawCatRows();
     drawIncRows();
+    settingsDrawn = readSettingsForm();
     drawBills();
     $("s-msg").textContent = "";
     $("bk-last").textContent = state.config.lastBackupAt ? "Last backup " + new Date(state.config.lastBackupAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }) : "No backup yet";
@@ -2581,13 +2603,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const problem = settingsProblem();
     if (problem) { $("s-msg").textContent = problem; return; }
     if (!state.configLoaded) { $("s-msg").textContent = "Your settings are still loading. Try again in a moment."; return; }
-    readCatRows(); readIncRows();
-    const rate = parseRate($("s-rate").value);
-    const food = parseAmt($("s-food").value);
-    const newRate = Math.round(rate * 10000) / 10000;
-    const cfg = { ...state.config, rate: newRate, rateSetAt: newRate !== state.config.rate || !state.config.rateSetAt ? Date.now() : state.config.rateSetAt,
-      foodLimit: food > 0 ? round2(food) : 0, foodCats: state.config.foodCats.slice(), bills: state.config.bills.map((b) => ({ ...b })),
-      incomeCats: draftIncs.map((c) => ({ ...c })), categories: draftCats.map((c) => ({ ...c })) };
+    const cfg = { ...settingsToSave(state.config, settingsDrawn, readSettingsForm(), Date.now()), foodCats: state.config.foodCats.slice(), bills: state.config.bills.map((b) => ({ ...b })) };
     $("s-save").disabled = true;
     try { await store.saveConfig(cfg); state.config = normalizeConfig(cfg); state.settingsDirty = false; toast("Settings saved"); renderAll("force"); }
     catch (e) { $("s-msg").textContent = "Could not save settings. Try again."; }

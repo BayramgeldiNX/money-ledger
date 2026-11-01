@@ -30,6 +30,20 @@ export function backupProblem(data) {
   return data.expenses.every((e) => typeof e.date === "string") ? "" : damaged;
 }
 
+// What Settings should save. Only what was really edited on the form changes, so anything another device saved while it sat open is kept.
+export function settingsToSave(latest, drawn, form, now) {
+  const pick = (k) => (JSON.stringify(form[k]) === JSON.stringify(drawn[k]) ? latest[k] : form[k]);
+  return { ...latest, rate: pick("rate"), rateSetAt: form.rate !== drawn.rate || !latest.rateSetAt ? now : latest.rateSetAt,
+    foodLimit: pick("foodLimit"), categories: pick("categories"), incomeCats: pick("incomeCats") };
+}
+
+// An entry saved before this device had your settings used the default rate (rateGuess). This puts it right once the real rate is known.
+export function withRealRate(e, rate) {
+  const { rateGuess, ...rest } = e;
+  const amount = Number(e.amount) || 0, inUsd = e.currency === "USD";
+  return { ...rest, rate, usd: round2(inUsd ? amount : amount / rate), rmb: round2(inUsd ? amount * rate : amount) };
+}
+
 export const monthList = (expenses, key) => expenses.filter((e) => typeof e.date === "string" && e.date.slice(0, 7) === key);
 
 // all = every entry; list = spending only (no income, no savings). rmb/usd = spent.
