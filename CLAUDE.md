@@ -8,6 +8,8 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 ## Rules (always)
 - **Design:** minimalist, premium bank-app feel. Yuan is the main number; dollars sit under it, in black. **Spending is red.**
   No streaks, goals, or gamification. Keep Home simple: Money left + today's food limit only. Detail belongs on other screens.
+  Light is the white minimal look: no card boxes, grey fills or rings; thin lines and white space instead (Home food limit is a thin line, not a ring). Dark keeps its cards and rings. New light/dark differences go through tokens, set in both dark blocks (use `initial` where a rule has its own fallback).
+- **White colours:** green-white. Fresh green-tinted background `#F4FAF5` (never pure white), vivid green `#0B8457` for main buttons and selected states (`--primary`, `--accent`), black numbers, vivid red spending `#D92D20`. Section and wallet icons keep their own colours, with no boxes.
 - **Numbers must be right.** Never round the owner's decimals away (12.8 stays ¥12.80). Accept comma decimals ("12,8").
   Rate: ¥6.70 = $1 (editable in Settings). Whole numbers show no decimals; others show two.
 - **Money rules** (in `src/lib/ledger.js`, tested):
@@ -30,6 +32,7 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 - `src/app.js`: the app (state, rendering, forms, reports). Still one big file, being split into `src/views/` over time.
 - `src/lib/`: `format.js` (money text, parseAmt), `dates.js`, `ledger.js` (stats + wallet math). **Pure and tested** — put new math here.
 - `src/motion.js`: DOM-only motion helpers (rolling digits, sliding highlight, swipe rows, skeletons, empty-state art, money flying between wallets, theme fade). Pure part `rollParts` is tested. All motion is skipped under `prefers-reduced-motion`; its CSS is the "Motion" section at the end of `styles.css` (tokens `--ease-*`, `--t-*`).
+- `src/theme.js`: Appearance switch (Auto / White / Dark), per device in `ml.theme`; never synced or backed up.
 - `src/lock.js`: Face ID lock screen and Settings card (iPhone/iPad only, needs sign-in; a passkey is used only to ask for Face ID, stored per device in `ml.lock.cred`; the fallback is a local 4-digit passcode on a number pad (6-digit ones saved earlier keep working), hashed in `ml.lock.pass`, which works offline; the account password is only for a forgotten passcode and turns the lock off; `ml.lock.left` in sessionStorage stops an app-update reload from asking for Face ID again).
 - `src/platform.js`: stand-in for what the Artifact gave (`window.claude.use("db" | "sample" | "downloads")`).
   - `db` → Firestore under `users/{uid}/` when signed in (`src/sync/firebase.js`); signed out it is `null` and data lives in `localStorage` (`ml.*` keys).

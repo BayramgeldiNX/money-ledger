@@ -1,5 +1,6 @@
 import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
 import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, sleep as wait } from "./motion.js";
+import { initThemeSwitch } from "./theme.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -81,6 +82,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
   // ---------- Helpers ----------
   const $ = (id) => document.getElementById(id);
+  // keeps the number inside the ring: long amounts get a smaller size class
+  const ringSize = (t) => (t.length > 8 ? " l" : t.length > 6 ? " m" : "");
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const todayISO = () => isoOf(new Date());
   const curMonth = () => todayISO().slice(0, 7);
@@ -976,7 +979,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const days = Array.from({ length: 7 }, (_, i) => addDays(today, i - 6)).map((d) => ({ d, v: foodOn(d) }));
       const logged = days.filter((x) => state.expenses.some((e) => e.date === x.d)), okDays = logged.filter((x) => x.v <= fl).length;
       html += '<div class="card stack"><div class="head"><h2>Food today</h2><span class="hint">' + esc(listJoin(state.config.foodCats.map((id) => catById(id).name))) + "</span></div>" +
-        '<div class="lim-top"><div class="ring ' + cls + '"><svg viewBox="0 0 92 92" aria-hidden="true"><circle class="bg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9"/><circle class="fg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - ratio)).toFixed(2) + '"/></svg><div class="center"><div class="v" data-v="' + Math.abs(fl - f) + '">' + rmb0(Math.abs(fl - f)) + '</div><div class="s">' + (over ? "over" : "left") + "</div></div></div>" +
+        '<div class="lim-top"><div class="ring ' + cls + '"><svg viewBox="0 0 92 92" aria-hidden="true"><circle class="bg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9"/><circle class="fg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - ratio)).toFixed(2) + '"/></svg><div class="center"><div class="v' + ringSize(rmb0(Math.abs(fl - f))) + '" data-v="' + Math.abs(fl - f) + '">' + rmb0(Math.abs(fl - f)) + '</div><div class="s">' + (over ? "over" : "left") + '</div></div><div class="ring-line"><i style="width:' + (ratio * 100).toFixed(1) + '%"></i></div></div>' +
         '<div><div class="lim-big' + (over ? " up" : "") + '">' + rmb0(f) + ' <small>of ' + rmb0(fl) + '</small></div><div class="lim-usd">' + usd(f / state.config.rate) + " of " + usd(fl / state.config.rate) + '</div><div class="hint">' + esc(dayShort(today)) + " · " + (over ? "over by " + rmb0(f - fl) + ". It starts fresh tomorrow." : "starts fresh every day.") + "</div></div></div>" +
         '<div class="lim-days">' + days.map((x) => { const p = Math.min(x.v / fl, 1.25) / 1.25 * 100, dt = new Date(x.d + "T12:00"); return '<div class="ld' + (x.v > fl ? " over" : "") + (x.d === today ? " now" : "") + '" title="' + esc(dayShort(x.d) + ": " + rmb0(x.v)) + '"><span class="ld-v">' + (x.v > 0 ? compactRmb(x.v) : "") + '</span><span class="ld-b"><i style="height:' + p + '%"></i><em style="bottom:' + (100 / 1.25) + '%"></em></span><span class="ld-l">' + esc(dt.toLocaleDateString("en-US", { weekday: "short" })) + "<b>" + dt.getDate() + "</b></span></div>"; }).join("") + "</div>" +
         (logged.length ? '<p class="hint" style="margin:0">' + esc(dayShort(days[0].d)) + " – " + esc(dayShort(today)) + ": under the limit on <b>" + okDays + " of " + logged.length + "</b> days you logged.</p>" : "") + "</div>";
@@ -1259,7 +1262,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const spent = foodOn(todayISO()), ratio = Math.min(spent / lim, 1), left = lim - spent;
       const cls = spent > lim ? "over" : ratio >= 0.8 ? "warn" : "", Rr = 38, C = 2 * Math.PI * Rr;
       html += '<div class="food-mini"><div class="ring ' + cls + '"><svg viewBox="0 0 92 92" aria-hidden="true"><circle class="bg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9"/><circle class="fg" cx="46" cy="46" r="' + Rr + '" fill="none" stroke-width="9" stroke-linecap="round" stroke-dasharray="' + C.toFixed(2) + '" stroke-dashoffset="' + (C * (1 - ratio)).toFixed(2) + '" data-from="' + (ringOff == null ? C : ringOff).toFixed(2) + '"/></svg>' +
-        '<div class="center"><div class="v">' + rmb0(Math.abs(left)) + '</div><div class="s">' + (left >= 0 ? "left" : "over") + '</div></div></div><div class="t">Food today<br>of ' + rmb0(lim) + "</div></div>";
+        '<div class="center"><div class="v' + ringSize(rmb0(Math.abs(left))) + '">' + rmb0(Math.abs(left)) + '</div><div class="s">' + (left >= 0 ? "left" : "over") + '</div></div><div class="ring-line"><i style="width:' + (ratio * 100).toFixed(1) + '%"></i></div></div><div class="t">Food today<br>of ' + rmb0(lim) + "</div></div>";
     }
     $("summary").innerHTML = html;
     // count the big number from what was shown before, and sweep the food ring to its new level
@@ -2865,8 +2868,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
 
     // motion: sliding highlights, sticky day headers, swipe rows, the light/dark ease
     initThemeFade();
+    initThemeSwitch($("s-theme"));
     ["f-cats", "f-method", "d-wallet"].forEach((id) => glide($(id), ".chip"));
-    ["f-type", "f-kind", "d-dir"].forEach((id) => glide($(id)));
+    ["f-type", "f-kind", "d-dir", "s-theme"].forEach((id) => glide($(id)));
     document.querySelectorAll(".cur-toggle").forEach((b) => glide(b));
     glide($("tabs-wrap"), "button", "aria-selected");
     watchStuck("month-list");
