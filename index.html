@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#F2F2F5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#F4FAF5" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
@@ -11,7 +11,8 @@
 <!-- Keep black-translucent: "default" with viewport-fit=cover makes iOS lay the app out one status bar too short, leaving a gap under the tab bar. -->
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>Money Ledger</title>
-<style>html{background:#F2F2F5}@media (prefers-color-scheme:dark){html{background:#000}}</style>
+<style>html{background:#F4FAF5}@media (prefers-color-scheme:dark){html{background:#000}}html[data-theme=light]{background:#F4FAF5}html[data-theme=dark]{background:#000}</style>
+<script>try{var t=localStorage.getItem("ml.theme");if(t==="light"||t==="dark")document.documentElement.setAttribute("data-theme",t)}catch(e){}</script>
 <link rel="icon" href="./favicon.ico">
 <link rel="apple-touch-icon" href="./apple-touch-icon.png">
 </head>
@@ -43,7 +44,7 @@
 
   <!-- HOME -->
   <section id="v-home">
-    <div class="card summary" id="summary"></div>
+    <div class="card flat summary" id="summary"></div>
 
     <div class="toolbar on-bg">
       <h2 class="list-title" id="list-title">Entries</h2>
@@ -59,7 +60,7 @@
 
     <div class="day-bar" id="day-bar" hidden></div>
 
-    <div class="card" style="margin-top:12px">
+    <div class="card flat" style="margin-top:12px">
       <div class="entries" id="month-list"></div>
     </div>
   </section>
@@ -77,6 +78,15 @@
   <!-- SETTINGS -->
   <section id="v-settings" class="stack" hidden>
     <div class="settings-grid">
+      <div class="card stack">
+        <div class="head"><h2>Appearance</h2></div>
+        <div class="seg" id="s-theme" role="group" aria-label="Appearance" style="align-self:flex-start">
+          <button type="button" data-choice="auto" aria-pressed="true">Auto</button>
+          <button type="button" data-choice="light" aria-pressed="false">White</button>
+          <button type="button" data-choice="dark" aria-pressed="false">Dark</button>
+        </div>
+        <p class="hint" style="margin:0">Auto follows your phone. Saved on this device only.</p>
+      </div>
       <div class="card stack" id="acct-card"></div>
       <div class="card stack" id="lock-card" hidden></div>
       <div class="card stack">
