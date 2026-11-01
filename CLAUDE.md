@@ -48,7 +48,7 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
   - wallet `{ id, name, icon, color, methods[], currency, balance, setAt }`; limit `{ id, name, cats[], amount, period: week|month }`;
     waiting-list item `{ id, reason, amount, currency, cat, method, addedAt, forMonth }`.
 - `debts/{id}`, `transfers/{id}`, `billruns/{id}`, `reviews/{key}`.
-- Offline: every change goes to a local outbox first and is sent when online (see `initStore` in `app.js`).
+- Offline: every change goes to a local outbox first and is sent when online (see `initStore` in `app.js`). Firebase's sign-in check on start blocks everything, even cached data, and can hang for a minute with no VPN, so `limitSignInCheck` in `src/sync/firebase.js` caps it at 2.5 seconds.
 
 ## Commands
 - `npm run dev` (port 5173; the preview config in `.claude/launch.json` uses 5180) · `npm run build` · `npm test` · `npm run gen:icons`
