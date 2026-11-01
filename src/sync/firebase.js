@@ -18,11 +18,28 @@ export const syncAvailable = !!config;
 // load() can be called twice at once (account card + storage), so the first call is shared
 let loading = null;
 const load = () => loading || (loading = start());
+
+// On start Firebase asks its server if the saved sign-in is still good, and nothing opens until it hears back, not even the data
+// on this device. With no VPN that request hangs for up to a minute, so it gets a short time. Running out is safe: to Firebase
+// it is the same as being offline, so you stay signed in. Sign-in and sync later on are not limited.
+const SIGN_IN_CHECK_MS = 2500;
+function limitSignInCheck() {
+  const realFetch = window.fetch;
+  window.fetch = (input, init) => {
+    const sent = realFetch(input, init);
+    if (!/identitytoolkit|securetoken/.test(String((input && input.url) || input))) return sent;
+    return Promise.race([sent, new Promise((_, reject) => setTimeout(() => reject(new TypeError("Sign-in check timed out")), SIGN_IN_CHECK_MS))]);
+  };
+  return () => { window.fetch = realFetch; };
+}
+
 async function start() {
   const [appMod, authMod, fsMod] = await Promise.all([import("firebase/app"), import("firebase/auth"), import("firebase/firestore")]);
   const app = appMod.initializeApp(config);
+  const endCheckLimit = limitSignInCheck();
   // No popup/redirect: email sign-in works inside Home Screen apps.
   const auth = authMod.initializeAuth(app, { persistence: [authMod.indexedDBLocalPersistence, authMod.browserLocalPersistence] });
+  auth.authStateReady().then(endCheckLimit, endCheckLimit);
   let db;
   try {
     db = fsMod.initializeFirestore(app, {
