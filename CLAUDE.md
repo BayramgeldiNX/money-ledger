@@ -40,6 +40,7 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
   - `downloads` → a normal file download; PDF libraries (html2canvas, jsPDF) are bundled and loaded on demand.
 - `tests/`: Vitest. `real-data.test.js` runs only if `tests/fixtures/real.json` exists.
 - `archive/artifact-version.html`: the last claude.ai Artifact build (v48), kept for reference only.
+- `docs/`: per-phone design plans (`iphone-15-pro-max-design.md` for 420–640 px portrait + iOS landscape, `samsung-s26-design.md`, `samsung-a55-design.md`) and `white-design-plan.md`. Phone-specific CSS sits at the end of `styles.css`.
 - `design/`: icon artwork + `make-icons.ps1`. `scripts/gen-icons.mjs` builds `public/` icons from it (`npm run gen:icons`).
 
 ## Data model (collections in the Artifact; same shape for Firestore)
