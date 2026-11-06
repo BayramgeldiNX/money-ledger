@@ -17,6 +17,9 @@ function apply(choice) {
     const own = m.media.includes("dark") ? COLORS.dark : COLORS.light;
     m.content = choice === "auto" ? own : COLORS[choice];
   });
+  // color-scheme follows a forced choice, so Samsung Internet / Chrome never force-darken a White page
+  const cs = document.querySelector('meta[name="color-scheme"]');
+  if (cs) cs.content = choice === "auto" ? "light dark" : choice;
 }
 
 export function setTheme(v) {

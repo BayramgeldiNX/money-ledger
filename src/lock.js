@@ -19,6 +19,8 @@ const randomBytes = (n) => crypto.getRandomValues(new Uint8Array(n));
 const FACE_ICON = '<svg viewBox="0 0 48 48" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M6 16V10a4 4 0 0 1 4-4h6M32 6h6a4 4 0 0 1 4 4v6M42 32v6a4 4 0 0 1-4 4h-6M16 42h-6a4 4 0 0 1-4-4v-6"/>' +
   '<path d="M17 19v3M31 19v3M24 19v8h-2M18 33c3.500 2.500 8.500 2.500 12 0"/></svg>';
+const PRINT_ICON = '<svg viewBox="0 0 48 48" width="30" height="30" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+  '<path d="M14 12a14 14 0 0 1 24 8v4M10 20a14 14 0 0 1 4-8M10 26v3a14 14 0 0 0 3 8M18 42c-2-3-3-6-3-10v-6a9 9 0 0 1 18 0v6c0 3 1 5 2 6M24 26v8c0 3 1 6 3 8M31 38c1 2 2 3 3 4"/></svg>';
 const DELETE_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7z"/><path d="M12 10l4 4M16 10l-4 4"/></svg>';
 
@@ -26,6 +28,9 @@ const DELETE_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none"
 const ANDROID = isAndroid(navigator);
 const BIO = ANDROID ? "Fingerprint" : "Face ID";
 const KEYCHAIN = ANDROID ? "Google Password Manager or Samsung Pass is on in the phone settings" : "iCloud Keychain is on in iPhone Settings";
+
+// Android Back must not close anything underneath the lock screen
+export const isLockShowing = () => locked;
 
 async function faceIdAvailable() {
   if (!(isIOS(navigator) || ANDROID) || !window.PublicKeyCredential) return false;
@@ -170,7 +175,7 @@ function buildCover() {
   pad = makePad(cover.querySelector(".pin"), {
     title: "Enter passcode",
     length: savedPinLength,
-    left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with ' + BIO + '">' + FACE_ICON + '</button>',
+    left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with ' + BIO + '">' + (ANDROID ? PRINT_ICON : FACE_ICON) + '</button>',
     onPin: usePasscode,
   });
   cover.querySelector("#lock-go").onclick = unlock;
