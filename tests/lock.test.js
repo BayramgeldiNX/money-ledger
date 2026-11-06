@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH, RELOCK_AFTER_MS } from "../src/lib/lock.js";
+import { isAndroid, osOf, isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH, RELOCK_AFTER_MS } from "../src/lib/lock.js";
 
 describe("isIOS", () => {
   it("knows iPhone and iPad", () => {
@@ -62,5 +62,26 @@ describe("waitAfterFails", () => {
   it("doubles, up to 15 minutes", () => {
     expect(waitAfterFails(6)).toBe(60000);
     expect(waitAfterFails(50)).toBe(15 * 60 * 1000);
+  });
+});
+
+describe("isAndroid / osOf", () => {
+  const samsung = "Mozilla/5.0 (Linux; Android 16; SM-S931B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Mobile Safari/537.36";
+  const samsungInternet = "Mozilla/5.0 (Linux; Android 16; SM-S931B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/28.0 Chrome/140.0.0.0 Mobile Safari/537.36";
+  const iphone = "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 Mobile/15E148 Safari/604.1";
+  const windows = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140.0.0.0 Safari/537.36";
+  it("knows Samsung Chrome and Samsung Internet", () => {
+    expect(isAndroid({ userAgent: samsung })).toBe(true);
+    expect(isAndroid({ userAgent: samsungInternet })).toBe(true);
+  });
+  it("leaves out iPhone and Windows", () => {
+    expect(isAndroid({ userAgent: iphone })).toBe(false);
+    expect(isAndroid({ userAgent: windows })).toBe(false);
+    expect(isAndroid()).toBe(false);
+  });
+  it("names the family", () => {
+    expect(osOf({ userAgent: samsung })).toBe("android");
+    expect(osOf({ userAgent: iphone })).toBe("ios");
+    expect(osOf({ userAgent: windows, platform: "Win32" })).toBe("");
   });
 });

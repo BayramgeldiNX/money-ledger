@@ -1,5 +1,7 @@
 import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
-import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, sleep as wait } from "./motion.js";
+import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, buzz, sleep as wait } from "./motion.js";
+import { isIOS, isAndroid } from "./lib/lock.js";
+import { initBack, syncBack } from "./backnav.js";
 import { initThemeSwitch } from "./theme.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
@@ -431,6 +433,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (v === "report") { lastReportAnim = null; playedCards.clear(); }
     pref.set("view", v);
     renderAll();
+    syncBack();
     window.scrollTo({ top: 0 });
     // the new screen fades in; a leftover month slide must not replay on it
     if (changed) { const el = $("v-" + v); el.classList.remove("slide-next", "slide-prev", "view-in"); void el.offsetWidth; el.classList.add("view-in"); }
@@ -448,6 +451,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // Home Screen app on iPhone: iOS can size the app shorter than the screen, which lifts everything fixed to the bottom.
   // --screen-h keeps short pages (Debts) as tall as the screen; --bar-gap moves the bottom bar down by whatever gap is left.
   function fitBottomBar() {
+    // iPhone only: on Android screen.height includes the status and navigation bars, which would push the bar behind the gesture bar
+    if (!isIOS(navigator)) return;
     const root = document.documentElement, bar = document.querySelector(".tabs-bar");
     const standalone = navigator.standalone === true || window.matchMedia("(display-mode: standalone)").matches;
     const phone = window.innerWidth <= 640 && window.innerHeight > window.innerWidth;
@@ -494,14 +499,23 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function watchKeyboard() {
     const vv = window.visualViewport; if (!vv) return;
     const root = document.documentElement;
+    // Android only: some browsers (Samsung Internet) shrink the layout viewport instead of the visual one. Then --kb stays 0
+    // (the layout already ends above the keyboard) but a focused field and a much shorter window still mean "keyboard open".
+    let fullH = window.innerHeight, fullW = window.innerWidth;
     const update = () => {
       const h = window.innerHeight - vv.height - vv.offsetTop, kb = h > 80 ? Math.round(h) : 0;
       const was = root.classList.contains("kb-open");
+      let open = kb > 0;
+      if (isAndroid(navigator)) {
+        const ae = document.activeElement, typing = !!ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+        if (window.innerWidth !== fullW || (!typing && window.innerHeight > fullH)) { fullW = window.innerWidth; fullH = window.innerHeight; }
+        if (!open && typing && window.innerHeight < fullH - 150) open = true;
+      }
       root.style.setProperty("--kb", kb + "px");
-      root.classList.toggle("kb-open", kb > 0);
+      root.classList.toggle("kb-open", open);
       fitBottomBar();
       const a = document.activeElement;
-      if (kb && !was && a && a.closest && a.closest(".sheet")) setTimeout(() => a.scrollIntoView({ block: "nearest" }), 60);
+      if (open && !was && a && a.closest && a.closest(".sheet")) setTimeout(() => a.scrollIntoView({ block: "nearest" }), 60);
     };
     vv.addEventListener("resize", update);
     vv.addEventListener("scroll", update);
@@ -1187,6 +1201,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         const id = await store.add(e);
         await savedCheck(btn);
         state.justAdded = id;
+        buzz();
         closeSheet();
         toast(savedText(e, id), false, id ? { label: "Undo", fn: async () => { try {
           await store.remove(id);
@@ -2899,6 +2914,16 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     enableSheetSwipe("sheet", closeSheet);
     enableSheetSwipe("dsheet", closeDebtSheet);
     enableSheetSwipe("csheet", closeCalSheet);
+    // Android Back: closes the passcode pad, then the top sheet, then goes Home
+    const watchOpen = new MutationObserver(syncBack);
+    ["sheet", "dsheet", "csheet"].forEach((id) => watchOpen.observe($(id), { attributes: true, attributeFilter: ["hidden"] }));
+    initBack([
+      { open: () => !!document.querySelector(".lock-screen[data-pad]"), close: () => { const b = document.querySelector(".lock-screen[data-pad] [data-cancel]"); if (b) b.click(); } },
+      { open: () => !$("csheet").hidden, close: closeCalSheet },
+      { open: () => !$("dsheet").hidden, close: closeDebtSheet },
+      { open: () => !$("sheet").hidden, close: closeSheet },
+      { open: () => state.view !== "home", close: () => setView("home") },
+    ]);
   }
   init();
 })();

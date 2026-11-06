@@ -2,8 +2,9 @@
 // lock screen on this device: it does not encrypt anything, and the data stays protected by the sign-in.
 // A 4-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
 // passcode, which is why turning the lock on needs a signed-in account.
-import { isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
+import { isIOS, isAndroid, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
+import { syncBack } from "./backnav.js";
 import { reduced, sleep } from "./motion.js";
 
 const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails", LEFT_KEY = "ml.lock.left";
@@ -21,8 +22,13 @@ const FACE_ICON = '<svg viewBox="0 0 48 48" width="30" height="30" fill="none" s
 const DELETE_ICON = '<svg viewBox="0 0 24 24" width="26" height="26" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
   '<path d="M9 5h10a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H9l-6-7z"/><path d="M12 10l4 4M16 10l-4 4"/></svg>';
 
+// The same lock on both phones; only the words differ
+const ANDROID = isAndroid(navigator);
+const BIO = ANDROID ? "Fingerprint" : "Face ID";
+const KEYCHAIN = ANDROID ? "Google Password Manager or Samsung Pass is on in the phone settings" : "iCloud Keychain is on in iPhone Settings";
+
 async function faceIdAvailable() {
-  if (!isIOS(navigator) || !window.PublicKeyCredential) return false;
+  if (!(isIOS(navigator) || ANDROID) || !window.PublicKeyCredential) return false;
   try { return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable(); } catch (e) { return false; }
 }
 
@@ -113,8 +119,10 @@ function padScreen(opts) {
   screen.className = "lock-screen";
   screen.setAttribute("role", "dialog");
   screen.innerHTML = '<div class="pin"></div>';
+  screen.dataset.pad = "1";
   document.body.appendChild(screen);
-  const close = () => screen.remove();
+  syncBack();
+  const close = () => { screen.remove(); syncBack(); };
   const pad = makePad(screen.querySelector(".pin"), { ...opts, left: '<button type="button" class="pin-key plain small" data-cancel>Cancel</button>', onPin: (pin) => opts.onPin(pin, pad, close) });
   screen.querySelector("[data-cancel]").onclick = () => { close(); if (opts.onCancel) opts.onCancel(); };
   return pad;
@@ -150,7 +158,7 @@ function buildCover() {
   cover.setAttribute("role", "dialog");
   cover.setAttribute("aria-label", "Money Ledger is locked");
   cover.innerHTML = '<div class="lock-box"><div class="pin"></div>' +
-    '<button type="button" class="btn primary" id="lock-go-big" hidden>Unlock with Face ID</button>' +
+    '<button type="button" class="btn primary" id="lock-go-big" hidden>Unlock with ' + BIO + '</button>' +
     '<form id="lock-form" class="stack" style="gap:10px" novalidate hidden>' +
     '<h2 class="pin-title">Account password</h2>' +
     '<p class="hint" style="margin:0">Needs internet. This turns the lock off, and you can turn it back on in Settings.</p>' +
@@ -162,7 +170,7 @@ function buildCover() {
   pad = makePad(cover.querySelector(".pin"), {
     title: "Enter passcode",
     length: savedPinLength,
-    left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with Face ID">' + FACE_ICON + '</button>',
+    left: '<button type="button" class="pin-key plain" id="lock-go" aria-label="Unlock with ' + BIO + '">' + FACE_ICON + '</button>',
     onPin: usePasscode,
   });
   cover.querySelector("#lock-go").onclick = unlock;
@@ -196,10 +204,10 @@ async function unlock() {
   pad.say("");
   try {
     if (await askFaceId()) openApp();
-    else pad.say("Face ID did not match. Try again.");
+    else pad.say(BIO + " did not match. Try again.");
   } catch (e) {
     // Cancelled, or iOS wants a tap first: the Face ID key is there. Anything else needs saying.
-    if (!e || e.name !== "NotAllowedError") { console.error(e); pad.say("Face ID is not working. Use your passcode."); }
+    if (!e || e.name !== "NotAllowedError") { console.error(e); pad.say(BIO + " is not working. Use your passcode."); }
   }
   asking = false;
 }
@@ -279,13 +287,13 @@ export async function startLock() {
   if (locked && !document.hidden) unlock();
 }
 
-// ---- The Face ID card in Settings. Only shown on an iPhone or iPad that can use it. ----
+// ---- The Face ID / Fingerprint card in Settings. Only shown on an iPhone, iPad or Android phone that can use it. ----
 export async function mountLockCard(el) {
   if (!el) return;
   card = el;
   if (!(await faceIdAvailable())) { el.hidden = true; return; }
   el.hidden = false;
-  const head = (state) => '<div class="head"><h2>Face ID</h2><span class="hint">' + state + '</span></div>';
+  const head = (state) => '<div class="head"><h2>' + BIO + '</h2><span class="hint">' + state + '</span></div>';
   let user = null;
   try { user = await currentUser(); } catch (e) { console.error(e); }
   if (!user) {
@@ -297,7 +305,7 @@ export async function mountLockCard(el) {
 
 function mountOff(el, head) {
   el.innerHTML = head("off") +
-    '<p class="hint" style="margin:0">Ask for Face ID when you open Money Ledger, and after a minute away. A 4-digit passcode opens it if Face ID fails, even with no internet.</p>' +
+    '<p class="hint" style="margin:0">Ask for ' + BIO + ' when you open Money Ledger, and after a minute away. A 4-digit passcode opens it if ' + BIO + ' fails, even with no internet.</p>' +
     '<button type="button" class="btn" id="lock-toggle" style="align-self:flex-start">Turn on</button><div class="form-msg" id="lock-card-msg" role="status"></div>';
   const msg = el.querySelector("#lock-card-msg");
   el.querySelector("#lock-toggle").onclick = () => {
@@ -319,7 +327,7 @@ function mountOff(el, head) {
         } catch (e) {
           if (!e || e.name !== "NotAllowedError") console.error(e);
           close();
-          msg.textContent = "Could not turn on Face ID. Check that iCloud Keychain is on in iPhone Settings, then try again.";
+          msg.textContent = "Could not turn on " + BIO + ". Check that " + KEYCHAIN + ", then try again.";
         }
       },
     });
@@ -329,7 +337,7 @@ function mountOff(el, head) {
 function mountOn(el, head) {
   const hasPin = !!read(PASS_KEY);
   el.innerHTML = head("on") +
-    '<p class="hint" style="margin:0">Money Ledger asks for Face ID when you open it, and after a minute away.' + (hasPin ? "" : " Turn this off and on again to add a passcode that works with no internet.") + '</p>' +
+    '<p class="hint" style="margin:0">Money Ledger asks for ' + BIO + ' when you open it, and after a minute away.' + (hasPin ? "" : " Turn this off and on again to add a passcode that works with no internet.") + '</p>' +
     '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="btn" id="lock-toggle">Turn off</button>' +
     '<button type="button" class="btn" id="lock-off-pin" hidden>Turn off with passcode</button></div>' +
     '<div class="form-msg" id="lock-card-msg" role="status"></div>';
@@ -343,7 +351,7 @@ function mountOn(el, head) {
       if (!e || e.name !== "NotAllowedError") console.error(e);
     }
     btn.disabled = false;
-    msg.textContent = "Face ID did not finish, so it stays on.";
+    msg.textContent = BIO + " did not finish, so it stays on.";
     viaPin.hidden = !hasPin;
   };
   viaPin.onclick = () => padScreen({

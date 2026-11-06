@@ -1,3 +1,4 @@
+import "./os.js";
 import "./platform.js";
 import "./styles.css";
 import "./app.js";
