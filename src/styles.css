@@ -124,6 +124,9 @@
 html { background: var(--bg); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f); font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
 body.sheet-open { overflow: hidden; }
+/* Android only: the status bar takes its colour from theme-color, so the iPhone's black strip would show as a black band */
+:root[data-os="android"] body::before { background: var(--bg); }
+
 /* Android only: no glow or stretch past the top of the page */
 :root[data-os="android"], :root[data-os="android"] body { overscroll-behavior-y: none; }
 h1, h2, h3 { margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
