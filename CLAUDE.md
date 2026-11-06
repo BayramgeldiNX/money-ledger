@@ -16,7 +16,12 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
   - Left = income − spent − saved. Savings count as saved, not spent. Debts never touch monthly totals.
   - A wallet changes only for things dated after its balance was set (`afterSet`). Dollar wallets keep dollars;
     a move between ¥ and $ wallets stores the amount the owner really received (`amountTo`).
-- **Defaults:** new entries start on ¥ and **Alipay**. Every entry starts in yuan.
+- **Defaults:** new entries start on ¥ and **Alipay**. Every entry starts in yuan. (Chinese mode; see Modes.)
+- **Modes** (`config.mode`, plan in `docs/international-mode-plan.md`): `"cn"` = the app above; `"intl"` = dollars only (no yuan shown),
+  no Alipay/WeChat Pay, no starting wallets (a wallet's name is its payment method), $ logo (`src/mode-icon.js`). No mode = Chinese
+  (the owner's account has none; never write one for it). A new empty account gets the first-time question (`src/views/mode-choice.js`);
+  Settings → Money mode switches. "Main money" (`setMainCur`): `rmb0`/`rmb`/`compactRmb` print the main symbol, `R(e)`/`statsOf` totals are main money,
+  `yuan0` is always ¥. Entries still store both `usd` and `rmb`, so switching never changes data.
 - **Privacy:** the owner's real data never goes into git. `tests/fixtures/` is gitignored (`real.json` = an export of the data).
   Never put the owner's email, passwords, or Firebase admin or service-account keys in the repo. (The Firebase web config in `src/sync/firebase-config.js` is public by design and is committed, like xiezi.) Never create accounts or type passwords for the owner.
 - The owner is in China on a VPN (Clash, proxy `http://127.0.0.1:7897`). Firebase and GitHub need it; set `HTTPS_PROXY`

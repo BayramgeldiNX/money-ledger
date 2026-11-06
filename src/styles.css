@@ -791,6 +791,52 @@ main { padding-block: 0 110px; }
   @media (min-width: 641px) { @keyframes sheetDown { to { transform: translateY(calc(-50% + 24px)); opacity: 0; } } }
 }
 
+/* ===== Mode choice ===== */
+/* First-time "Which money do you use?" screen and the Settings "Money mode" card. Tokens only. */
+.mc-screen { position: fixed; inset: 0; z-index: 80; background: var(--bg); color: var(--ink); display: grid; place-items: center; padding: calc(24px + env(safe-area-inset-top, 0px)) max(24px, env(safe-area-inset-right, 0px)) calc(24px + env(safe-area-inset-bottom, 0px)) max(24px, env(safe-area-inset-left, 0px)); overflow-y: auto; overscroll-behavior: contain; }
+.mc-box { width: 100%; max-width: 420px; display: flex; flex-direction: column; gap: 14px; }
+.mc-brand { display: flex; align-items: center; gap: 10px; font-size: 18px; font-weight: 800; letter-spacing: -0.03em; margin-bottom: 14px; }
+.mc-title { font-size: 26px; font-weight: 800; line-height: 1.2; margin-bottom: 6px; outline: none; }
+.mc-choices { display: flex; flex-direction: column; }
+.mc-choice { display: flex; align-items: center; gap: 16px; width: 100%; text-align: left; border: 0; background: var(--fill); border-bottom: 1px solid var(--line); padding: 18px 4px; min-height: 84px; border-radius: 0; color: var(--ink); transition: background .15s; }
+.mc-choice:first-child { border-top: 1px solid var(--line); }
+.mc-sym { flex: none; width: 48px; text-align: center; font-size: 34px; font-weight: 800; color: var(--muted); line-height: 1; }
+.mc-text { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.mc-text b { font-size: 18px; font-weight: 800; }
+.mc-text small { font-size: 13px; line-height: 1.4; color: var(--muted); font-weight: 500; }
+.mc-choice.on { border-bottom-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); padding-left: 14px; }
+.mc-choice.on .mc-sym, .mc-choice.on .mc-text b { color: var(--accent); }
+.mc-box .mc-go { flex: none; width: 100%; margin-top: 8px; min-height: 54px; }
+.mc-note { text-align: center; margin: 0; }
+.mc-screen.out { opacity: 0; pointer-events: none; transition: opacity .2s ease; }
+@media (max-width: 360px) { .mc-title { font-size: 23px; } .mc-sym { width: 38px; font-size: 28px; } .mc-choice { gap: 12px; } }
+@media (orientation: landscape) and (max-height: 520px) {
+  .mc-screen { place-items: start center; }
+  .mc-box { gap: 10px; }
+  .mc-brand { margin-bottom: 0; }
+  .mc-title { font-size: 21px; margin-bottom: 0; }
+  .mc-choice { min-height: 64px; padding-block: 10px; }
+}
+/* Dark keeps its cards */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .mc-choices { gap: 10px; }
+  :root:not([data-theme="light"]) .mc-choice, :root:not([data-theme="light"]) .mc-choice:first-child { border: 0; border-radius: 18px; padding: 16px; }
+  :root:not([data-theme="light"]) .mc-choice.on { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+}
+:root[data-theme="dark"] .mc-choices { gap: 10px; }
+:root[data-theme="dark"] .mc-choice, :root[data-theme="dark"] .mc-choice:first-child { border: 0; border-radius: 18px; padding: 16px; }
+:root[data-theme="dark"] .mc-choice.on { box-shadow: inset 0 0 0 2px var(--accent); background: var(--accent-soft); }
+.mc-seg { align-self: flex-start; max-width: 100%; }
+.mc-seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+.mc-confirm { display: flex; flex-direction: column; gap: 10px; }
+.mc-confirm[hidden] { display: none; }
+.mc-ask { margin: 0; color: var(--ink); }
+
+/* ===== International mode ===== */
+/* Dollars only: the small second-money lines, the currency switches and the rate card are hidden. The saved rate is kept. */
+.mode-intl .usd, .mode-intl .usd-line, .mode-intl .total-alt, .mode-intl .lim-usd, .mode-intl .lim-usd-s,
+.mode-intl .entry .amt .alt, .mode-intl .convert, .mode-intl .cur-toggle, .mode-intl #b-cur, .mode-intl #rate-card { display: none !important; }
+
 /* Motion: calm and quick. Everything here is skipped when the phone asks for reduced motion. */
 @media (prefers-reduced-motion: no-preference) {
   .entry.fresh { animation: freshIn .45s cubic-bezier(.2,.8,.2,1) both, freshGlow 1.8s ease-out; }

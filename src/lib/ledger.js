@@ -2,11 +2,12 @@
 //   An entry is income, savings (counts as saved, not spent) or spending.
 //   Left = income - spent - saved.
 //   A wallet changes only for things that happened AFTER the balance was set.
-import { round2 } from "./format.js";
+import { round2, mainCur } from "./format.js";
 import { isoOf } from "./dates.js";
 
-export const R = (e) => Number(e.rmb) || 0;
-export const U = (e) => Number(e.usd) || 0;
+// R = the entry in MAIN money (yuan, or dollars in International mode); U = the other one.
+export const R = (e) => (mainCur() === "USD" ? Number(e.usd) || 0 : Number(e.rmb) || 0);
+export const U = (e) => (mainCur() === "USD" ? Number(e.rmb) || 0 : Number(e.usd) || 0);
 export const isInc = (e) => e.type === "income";
 export const isSave = (e) => !isInc(e) && e.kind === "save";
 export const isSpend = (e) => !isInc(e) && e.kind !== "save";
@@ -70,7 +71,8 @@ export function statsOf(expenses, key) {
 }
 
 export const wCur = (w) => (w && w.currency === "USD" ? "USD" : "RMB");
-export const wToRmb = (w, n, rate) => (wCur(w) === "USD" ? n * rate : n);
+// a wallet amount in MAIN money (yuan, or dollars in International mode)
+export const wToRmb = (w, n, rate) => (mainCur() === "USD" ? (wCur(w) === "USD" ? n : n / rate) : wCur(w) === "USD" ? n * rate : n);
 
 // An entry changes a wallet only if it happened after the balance was set: dated a later day,
 // or dated that same day and added after the balance. Older-dated entries you type in later are
@@ -101,7 +103,7 @@ export function walletMoves(w, data, rate, catName = (id) => id) {
   };
   data.expenses.forEach((e) => {
     if (!afterSet(w, e.date, e.createdAt) || !owns(e)) return;
-    const v = wCur(w) === "USD" ? U(e) : R(e);
+    const v = wCur(w) === "USD" ? Number(e.usd) || 0 : Number(e.rmb) || 0; // the wallet's own currency, whatever the main money is
     moves.push({ at: e.createdAt, date: e.date, label: e.reason || catName(e.cat), amt: isInc(e) ? v : -v });
   });
   data.debts.forEach((d) => {
@@ -126,7 +128,7 @@ export function walletBalanceOn(w, data, rate, iso) {
   return round2(w.balance + walletMoves(w, data, rate).filter((m) => (m.date || "") <= iso).reduce((a, m) => a + m.amt, 0));
 }
 
-// All wallets at the end of a day, in yuan. `missing` = wallets whose balance starts after that day, left out of the total.
+// All wallets at the end of a day; total is in main money (yuan, or dollars in International mode). `missing` = wallets whose balance starts after that day, left out of the total.
 export function moneyOn(wallets, data, rate, iso) {
   const rows = wallets.map((w) => ({ w, b: walletBalanceOn(w, data, rate, iso) }));
   const known = rows.filter((x) => x.b != null), missing = rows.filter((x) => x.b == null).map((x) => x.w);
