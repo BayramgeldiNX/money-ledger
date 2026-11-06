@@ -3,6 +3,7 @@ import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initS
 import { isIOS, isAndroid } from "./lib/lock.js";
 import { initBack, syncBack } from "./backnav.js";
 import { initThemeSwitch } from "./theme.js";
+import { isLockShowing } from "./lock.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -2918,6 +2919,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const watchOpen = new MutationObserver(syncBack);
     ["sheet", "dsheet", "csheet"].forEach((id) => watchOpen.observe($(id), { attributes: true, attributeFilter: ["hidden"] }));
     initBack([
+      // locked: Back closes nothing (close does nothing, and syncBack puts the entry straight back)
+      { open: isLockShowing, close: () => {} },
       { open: () => !!document.querySelector(".lock-screen[data-pad]"), close: () => { const b = document.querySelector(".lock-screen[data-pad] [data-cancel]"); if (b) b.click(); } },
       { open: () => !$("csheet").hidden, close: closeCalSheet },
       { open: () => !$("dsheet").hidden, close: closeDebtSheet },
