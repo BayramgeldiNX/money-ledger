@@ -9,6 +9,7 @@
 /* Layout: minimal banking app. Home = one summary card (month total in yuan + food ring), a List/Calendar switch, and the entries.
    Adding happens in a bottom sheet opened by the round + button. Report and Settings are separate tabs. Yuan is always the main number. */
 :root {
+  color-scheme: light;
   --bg: #F4FAF5;
   --surface: #F4FAF5;
   --surface-2: #DFF1E5;
@@ -123,6 +124,8 @@
 html { background: var(--bg); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--f); font-size: 15px; line-height: 1.5; font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
 body.sheet-open { overflow: hidden; }
+/* Android only: no glow or stretch past the top of the page */
+:root[data-os="android"], :root[data-os="android"] body { overscroll-behavior-y: none; }
 h1, h2, h3 { margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
@@ -1053,3 +1056,17 @@ select.input { padding-right: 34px; background-image: url("data:image/svg+xml,%3
 .cal-nav .icon-btn:disabled { opacity: .35; }
 .cal-month { font-size: 17px; font-weight: 800; letter-spacing: -0.02em; }
 #csheet .cal .day { min-height: 52px; }
+
+/* Narrow phones (Galaxy S26 is about 360 wide): the title stays on one line. iPhone 16 (393) is wider, so it is untouched. */
+@media (max-width: 370px) {
+  .brand { white-space: nowrap; font-size: 16px; gap: 8px; }
+  .top .wrap { gap: 8px; }
+  .month-switch .label { min-width: 84px; }
+}
+
+/* Android only: swipe rows pan vertically only (so Chrome never steals the horizontal swipe), sheets and backdrop keep scrolls to themselves, narrow tab labels get an ellipsis */
+:root[data-os="android"] .swipe > .entry { touch-action: pan-y; }
+:root[data-os="android"] #sheet, :root[data-os="android"] #dsheet, :root[data-os="android"] #csheet, :root[data-os="android"] .scrim { overscroll-behavior: contain; }
+@media (max-width: 370px) {
+  :root[data-os="android"] .tabs button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+}

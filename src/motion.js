@@ -1,6 +1,10 @@
 // Motion helpers: small DOM-only pieces that make the app feel alive. Every one of them is skipped, or lands instantly,
 // when the phone asks for reduced motion. Money math never lives here: these only change how numbers and rows arrive.
 
+// A tiny tap of vibration, Android only (iPhone has no navigator.vibrate). Used for a saved entry and a swipe passing the delete point.
+export const buzz = (ms = 10) => {
+  try { if (/Android/i.test(navigator.userAgent) && !reduced() && navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* no vibration here */ }
+};
 export const reduced = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -158,6 +162,9 @@ export function initSwipe(list, { onEdit, onDelete }) {
     if (x < -OPEN) x = -OPEN + (x + OPEN) * 0.3;
     if (x > 0) x = Math.min(x * 0.7, 130);
     t.cur = x;
+    const past = x <= -OPEN / 2;
+    if (past && !t.buzzed) buzz();
+    t.buzzed = past;
     t.w.classList.toggle("right", x > 0);
     t.w.classList.toggle("ready", x >= EDIT_AT);
     setX(t.w, x, false);
