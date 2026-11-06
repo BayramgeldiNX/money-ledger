@@ -15,7 +15,7 @@ export default defineConfig(({ command }) => ({
   plugins: [
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["favicon.ico", "apple-touch-icon.png"],
+      includeAssets: ["favicon.ico", "apple-touch-icon.png", "apple-touch-icon-usd.png", "favicon-usd.png", "icon-usd-192.png", "icon-usd-512.png", "icon-usd-maskable-512.png", "manifest-intl.webmanifest"],
       manifest: {
         id: base,
         name: "Money Ledger",
@@ -35,7 +35,7 @@ export default defineConfig(({ command }) => ({
         ],
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,woff2,png,svg,ico,json}"],
+        globPatterns: ["**/*.{js,css,html,woff2,png,svg,ico,json,webmanifest}"],
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         navigateFallback: "index.html",
         cleanupOutdatedCaches: true,

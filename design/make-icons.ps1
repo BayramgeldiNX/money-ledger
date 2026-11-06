@@ -1,7 +1,8 @@
 # Draws the Money Ledger icon (dark squircle, white yuan mark, green dot) and saves PNG + ICO files.
+param([string]$Mark = "yuan")  # -Mark dollar draws a $ instead of the yuan sign (saves *-usd.png only)
 Add-Type -AssemblyName System.Drawing
 
-function New-Icon([int]$size, [bool]$square = $false) {
+function New-Icon([int]$size, [bool]$square = $false, [string]$mark = "yuan") {
   $bmp = New-Object System.Drawing.Bitmap $size, $size
   $g = [System.Drawing.Graphics]::FromImage($bmp)
   $g.SmoothingMode = [System.Drawing.Drawing2D.SmoothingMode]::AntiAlias
@@ -26,15 +27,28 @@ function New-Icon([int]$size, [bool]$square = $false) {
   $pen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
   $pen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
   $pen.LineJoin = [System.Drawing.Drawing2D.LineJoin]::Round
-  $v = New-Object System.Drawing.Drawing2D.GraphicsPath
-  $v.AddLines([System.Drawing.PointF[]]@(
-    (New-Object System.Drawing.PointF (352*$s), (300*$s)),
-    (New-Object System.Drawing.PointF (512*$s), (515*$s)),
-    (New-Object System.Drawing.PointF (672*$s), (300*$s))))
-  $g.DrawPath($pen, $v)
-  $g.DrawLine($pen, (512*$s), (515*$s), (512*$s), (770*$s))
-  $g.DrawLine($pen, (392*$s), (570*$s), (632*$s), (570*$s))
-  $g.DrawLine($pen, (392*$s), (680*$s), (632*$s), (680*$s))
+  if ($mark -eq "dollar") {
+    function P([double]$x, [double]$y) { New-Object System.Drawing.PointF ([single]($x*$s)), ([single]($y*$s)) }
+    $v = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $v.AddBezier((P 648 400), (P 648 340), (P 590 320), (P 512 320))
+    $v.AddBezier((P 512 320), (P 430 320), (P 380 360), (P 380 425))
+    $v.AddBezier((P 380 425), (P 380 490), (P 430 510), (P 512 515))
+    $v.AddBezier((P 512 515), (P 594 520), (P 644 545), (P 644 610))
+    $v.AddBezier((P 644 610), (P 644 675), (P 594 710), (P 512 710))
+    $v.AddBezier((P 512 710), (P 430 710), (P 376 680), (P 376 620))
+    $g.DrawPath($pen, $v)
+    $g.DrawLine($pen, (512*$s), (250*$s), (512*$s), (780*$s))
+  } else {
+    $v = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $v.AddLines([System.Drawing.PointF[]]@(
+      (New-Object System.Drawing.PointF (352*$s), (300*$s)),
+      (New-Object System.Drawing.PointF (512*$s), (515*$s)),
+      (New-Object System.Drawing.PointF (672*$s), (300*$s))))
+    $g.DrawPath($pen, $v)
+    $g.DrawLine($pen, (512*$s), (515*$s), (512*$s), (770*$s))
+    $g.DrawLine($pen, (392*$s), (570*$s), (632*$s), (570*$s))
+    $g.DrawLine($pen, (392*$s), (680*$s), (632*$s), (680*$s))
+  }
 
   # green dot
   $dot = New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(255, 70, 199, 127))
@@ -46,6 +60,12 @@ function New-Icon([int]$size, [bool]$square = $false) {
 }
 
 $out = $PSScriptRoot
+if ($Mark -eq "dollar") {
+  (New-Icon 1024 $false "dollar").Save((Join-Path $out "money-ledger-icon-usd.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  (New-Icon 1024 $true "dollar").Save((Join-Path $out "money-ledger-iphone-usd.png"), [System.Drawing.Imaging.ImageFormat]::Png)
+  "done (dollar)"
+  return
+}
 $big = New-Icon 1024
 $big.Save((Join-Path $out "money-ledger-icon.png"), [System.Drawing.Imaging.ImageFormat]::Png)
 

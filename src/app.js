@@ -1,9 +1,11 @@
-import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
+import { round2, fmt, fmt0, smart, sign, usd, usd0, usdS, rmb, rmb0, rmbS, yuan0, setMainCur, mainSym, compactRmb, parseAmt, amountInText, normNum, NUM_RE, pct, ordinal, listJoin, csvCell, parseRate, nOf } from "./lib/format.js";
 import { rollNumber, spendTick, glide, skeletonRows, emptyArt, watchStuck, initSwipe, staggerRows, snapshotBars, morphBars, scrubBars, flyMoney, initThemeFade, buzz, sleep as wait } from "./motion.js";
 import { isIOS, isAndroid } from "./lib/lock.js";
 import { initBack, syncBack } from "./backnav.js";
 import { initThemeSwitch } from "./theme.js";
 import { isLockShowing } from "./lock.js";
+import { applyModeIcon, rememberedMode } from "./mode-icon.js";
+import { askMode, mountModeCard } from "./views/mode-choice.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -43,9 +45,23 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const DEFAULT_FOOD_LIMIT = 100;
   const DEFAULT_FOOD_CATS = ["groceries", "dining", "coffee", "snacks"];
   const METHODS = ["Alipay", "WeChat Pay", "Cash", "Bank card", "Credit card", "Bank transfer", "Other"];
-  const DEFAULT_METHOD = "Alipay";
-  // payment methods = the standard list plus any wallet you added yourself
-  const allMethods = () => { const extra = (state && state.config && state.config.wallets ? state.config.wallets : []).flatMap((w) => w.methods).filter((m) => !METHODS.includes(m)); return METHODS.slice(0, -1).concat(extra, ["Other"]); };
+  // Which mode the screen is drawn in. Set from the saved settings by applyMode() before anything is drawn.
+  let modeNow = rememberedMode(), iconMode = null;
+  setMainCur(modeNow === "intl" ? "USD" : "RMB");
+  const isIntl = () => modeNow === "intl";
+  const walletList = () => { try { return state.config.wallets || []; } catch (e) { return []; } };
+  // payment methods: Chinese = the standard list plus your own wallets; International = your wallets, then Cash, Credit card, Other
+  const methods = () => {
+    if (isIntl()) return Array.from(new Set(walletList().flatMap((w) => w.methods).concat(["Cash", "Credit card", "Other"])));
+    const extra = walletList().flatMap((w) => w.methods).filter((m) => !METHODS.includes(m));
+    return METHODS.slice(0, -1).concat(extra, ["Other"]);
+  };
+  const allMethods = methods;
+  const defaultMethod = () => { if (!isIntl()) return "Alipay"; const w = walletList().find((x) => x.methods && x.methods.length); return w ? w.methods[0] : "Cash"; };
+  const curDefault = () => (isIntl() ? "USD" : "RMB");
+  // an amount typed in its own currency, shown the way the mode wants it (International never shows yuan)
+  const typedText = (amount, cur, rate) => (isIntl() ? usd0(cur === "USD" ? amount : amount / (Number(rate) || state.config.rate)) : cur === "RMB" ? yuan0(amount) : usd0(amount));
+  const mainOf = (n, cur, rate) => (isIntl() ? (cur === "USD" ? n : n / rate) : cur === "USD" ? n * rate : n);
   const KIND_LABEL = { need: "Need", want: "Want", save: "Savings" };
   const NO_REASON = "(no reason written)";
 
@@ -108,6 +124,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const listOf = (v, fallback) => { const l = Array.isArray(v) ? v.filter((x) => x && x.id) : []; return l.length ? l : fallback; };
     const cats = listOf(c.categories, DEFAULT_CATS);
     return {
+      mode: c.mode === "intl" ? "intl" : c.mode === "cn" ? "cn" : null,
       rate: Number(c.rate) > 0 ? Number(c.rate) : DEFAULT_RATE,
       rateSetAt: Number(c.rateSetAt) > 0 ? Number(c.rateSetAt) : 0,
       income: Number(c.income) > 0 ? Number(c.income) : 0,
@@ -124,7 +141,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       limits: (Array.isArray(c.limits) ? c.limits : Number(c.shopLimit) > 0 ? [{ id: "lim-shop", name: "Shopping", cats: Array.isArray(c.shopCats) ? c.shopCats : ["shopping", "clothing"], amount: Number(c.shopLimit), period: "month" }] : [])
         .filter((l) => l && l.id && Number(l.amount) > 0 && Array.isArray(l.cats) && l.cats.length)
         .map((l) => ({ id: String(l.id), name: String(l.name || ""), cats: l.cats.map(String), amount: Number(l.amount), period: l.period === "week" ? "week" : "month" })),
-      later: Array.isArray(c.later) ? c.later.filter((x) => x && x.id && Number(x.amount) > 0).map((x) => ({ id: String(x.id), reason: String(x.reason || ""), amount: Number(x.amount), currency: x.currency === "USD" ? "USD" : "RMB", cat: String(x.cat || "shopping"), method: String(x.method || DEFAULT_METHOD), addedAt: Number(x.addedAt) || 0, forMonth: String(x.forMonth || "") })) : [],
+      later: Array.isArray(c.later) ? c.later.filter((x) => x && x.id && Number(x.amount) > 0).map((x) => ({ id: String(x.id), reason: String(x.reason || ""), amount: Number(x.amount), currency: x.currency === "USD" ? "USD" : "RMB", cat: String(x.cat || "shopping"), method: String(x.method || (c.mode === "intl" ? "Cash" : "Alipay")), addedAt: Number(x.addedAt) || 0, forMonth: String(x.forMonth || "") })) : [],
       categories: cats.map((x) => ({ id: String(x.id), name: String(x.name || "Section"), color: String(x.color || "#888888"), kind: KIND_LABEL[x.kind] ? x.kind : "want", budget: Number(x.budget) > 0 ? Number(x.budget) : 0 }))
     };
   }
@@ -145,7 +162,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     searchAll: false,
     reviews: {},
     editId: null,
-    form: { currency: "RMB", cat: null, kind: "need", kindTouched: false, method: "Alipay" },
+    form: { currency: curDefault(), cat: null, kind: "need", kindTouched: false, method: defaultMethod() },
     settingsDirty: false
   };
   const catById = (id) => state.config.categories.find((c) => c.id === id) || state.config.incomeCats.find((c) => c.id === id) || { id: id, name: "Other", color: "#A38B6D", kind: "want", budget: 0 };
@@ -156,7 +173,74 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const limSpent = (l, date, exceptId) => limEntries(l, date, exceptId).reduce((a, e) => a + R(e), 0);
   const limName = (l) => l.name || listJoin(l.cats.map((id) => catById(id).name));
   const limWord = (l) => (l.period === "week" ? "week" : "month");
-  const laterRmb = (x) => (x.currency === "USD" ? x.amount * state.config.rate : x.amount);
+  const laterRmb = (x) => mainOf(x.amount, x.currency, state.config.rate);
+
+  // ---------- Mode (Chinese / International) ----------
+  let textMode = null, askScheduled = false, modeAsked = false;
+  // Runs before every draw. Until the real settings have loaded, the mode last used on this device is kept.
+  function applyMode() {
+    const m = state.configLoaded ? (state.config.mode === "intl" ? "intl" : "cn") : rememberedMode();
+    modeNow = m;
+    setMainCur(m === "intl" ? "USD" : "RMB");
+    document.documentElement.classList.toggle("mode-intl", m === "intl");
+    if (state.configLoaded && iconMode !== m) { iconMode = m; applyModeIcon(m); }
+    if (textMode !== m) {
+      const first = textMode === null;
+      textMode = m;
+      syncModeText();
+      // a form that is not open starts in the new mode's money and payment method
+      if (!first || state.configLoaded) { const sh = $("sheet"); if (sh && sh.hidden) { state.form.currency = curDefault(); state.form.method = defaultMethod(); } }
+    }
+  }
+  // the few fixed words in index.html that name a currency or an app
+  function syncModeText() {
+    const set = (id, t) => { const el = $(id); if (el) el.textContent = t; };
+    const intl = isIntl(), sym = mainSym();
+    set("s-food-l", intl ? "Dollars per day (0 turns it off)" : "Yuan per day (0 turns it off)");
+    set("s-bud-hint", "Budget in " + sym + ". Leave 0 for none.");
+    set("s-bud-col", "Budget (" + sym + ")");
+    const sm = $("smart-in"); if (sm) sm.placeholder = intl ? "Or type it: coffee 4.50 card" : "Or type it: lunch 38 wechat";
+    const bm = $("b-cur"); if (bm) bm.value = curDefault();
+  }
+  // The first-time question. Only for a settings document that really has nothing in it: no mode, no wallets, no entries.
+  // Signed in, it must have come from the server (not an empty cache) and the account must be quiet for a moment.
+  function modeQuestionDue() {
+    if (modeAsked || !store || !state.configLoaded || !state.loaded || !state.debtsLoaded) return false;
+    if (state.mode === "db" && (!state.configServer || outbox.length)) return false;
+    const c = state.config;
+    return !c.mode && c.wallets === null && !state.expenses.length && !state.debts.length && !state.transfers.length;
+  }
+  function maybeAskMode() {
+    if (askScheduled || !modeQuestionDue()) return;
+    askScheduled = true;
+    setTimeout(async () => {
+      askScheduled = false;
+      if (!modeQuestionDue()) return;
+      if (isLockShowing()) { setTimeout(maybeAskMode, 1500); return; }
+      modeAsked = true;
+      let choice;
+      try { choice = await askMode(); } catch (e) { return; }
+      // if anything arrived while the question was open, leave that account alone
+      if (state.config.mode || state.config.wallets !== null || state.expenses.length || state.debts.length) return;
+      // International starts with no wallets and a dollar-sized food limit (the yuan default of 100 would be $100 a day)
+      const intlStart = choice === "intl" ? { wallets: [], foodLimit: state.config.foodLimit === DEFAULT_FOOD_LIMIT ? 20 : state.config.foodLimit } : {};
+      try { await store.saveConfig({ ...state.config, mode: choice === "intl" ? "intl" : "cn", ...intlStart }); }
+      catch (e) { toast("Could not save your choice. Try again from Settings.", true); }
+    }, state.mode === "db" ? 2000 : 50);
+  }
+  async function changeMode(newMode) {
+    if (!state.configLoaded) { toast("Your settings are still loading. Try again in a moment.", true); return; }
+    try {
+      await store.saveConfig({ ...state.config, mode: newMode === "intl" ? "intl" : "cn" });
+      renderAll("force"); mountModeSettings();
+      toast(newMode === "intl" ? "Now in dollars" : "Now in yuan");
+    } catch (e) { toast("Could not save. Try again.", true); }
+  }
+  function mountModeSettings() {
+    const el = $("mode-card"); if (!el) return;
+    el.hidden = false;
+    mountModeCard(el, { mode: isIntl() ? "intl" : "cn", onChange: changeMode });
+  }
 
   // ---------- Storage ----------
   let store = null;
@@ -255,6 +339,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       }, (err) => { showError("Your expenses could not load (" + (err && err.code) + "). Reload the page to try again."); });
       db.doc("config/main").onSnapshot((snap) => {
         // no copy on this device yet is not the same as no settings: wait for the server to say so
+        if (!snap.fromCache) state.configServer = true;
         if (!snap.exists && snap.fromCache) return;
         if (snap.exists) raw.config = snap.data();
         // Settings was drawn from the defaults, so anything typed there gives way to the real values
@@ -269,7 +354,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       state.mode = "local";
       state.expenses = cleanExpenses(local.read("ml.expenses", []));
       state.config = normalizeConfig(local.read("ml.config", null));
-      state.loaded = true; state.configLoaded = true;
+      state.loaded = true; state.configLoaded = true; state.configServer = true;
       const persist = () => local.write("ml.expenses", state.expenses);
       const runs = local.read("ml.billruns", {});
       store = {
@@ -336,6 +421,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     document.querySelector(".month-switch").hidden = !on;
   }
   function renderAll(configChanged) {
+    applyMode();
     $("m-label").textContent = monthName(state.month, { month: "short", year: "numeric" });
     syncMonthSwitch();
     renderBanners();
@@ -353,6 +439,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       v.classList.remove("slide-next", "slide-prev"); void v.offsetWidth; v.classList.add("slide-" + state.slide);
       state.slide = null;
     }
+    maybeAskMode();
   }
   let errMsg = "";
   function showError(msg) { errMsg = msg; renderBanners(); }
@@ -378,7 +465,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const ex = state.expenses.filter((e) => e.example).length + state.debts.filter((d) => d.example).length;
     if (ex) html += '<div class="banner"><span class="grow">These are <strong>' + ex + " example entries</strong>. Remove them when you are ready to start.</span>" + '<button class="btn small primary" type="button" id="rm-examples">Remove examples</button></div>';
     const rs = state.config.rateSetAt, days = rs ? Math.floor((Date.now() - rs) / 86400000) : 0;
-    if (state.configLoaded && rs && days >= 30) html += '<div class="banner"><span class="grow">Your exchange rate <strong>¥' + state.config.rate.toFixed(2) + " = $1</strong> was set " + days + " days ago. Is it still right?</span>" +
+    if (!isIntl() && state.configLoaded && rs && days >= 30) html += '<div class="banner"><span class="grow">Your exchange rate <strong>¥' + state.config.rate.toFixed(2) + " = $1</strong> was set " + days + " days ago. Is it still right?</span>" +
       '<button class="btn small" type="button" id="rate-ok">Still right</button><button class="btn small primary" type="button" id="rate-upd">Update</button></div>';
     $("banners").innerHTML = html;
     const sn = $("sync-now"); if (sn) sn.onclick = () => { clearTimeout(retryTimer); flushOutbox(); };
@@ -642,13 +729,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (!sel.value) sel.selectedIndex = 0;
     const ms = $("b-method"), keepM = ms.value;
     ms.innerHTML = allMethods().map((m) => '<option value="' + esc(m) + '">Paid with ' + esc(m) + "</option>").join("");
-    ms.value = keepM || DEFAULT_METHOD;
+    ms.value = keepM || defaultMethod();
     if (!ms.value) ms.selectedIndex = 0;
     const bills = state.config.bills.slice().sort((a, b) => a.day - b.day);
     box.innerHTML = bills.length ? bills.map((b) => {
       const c = catById(b.cat);
       return '<div class="entry bill-row">' + tile(c) + '<span style="min-width:0"><div class="reason">' + esc(b.name) + '</div><div class="meta"><span>' + esc(c.name) + "</span><span>·</span><span>on the " + ordinal(b.day) + "</span><span>·</span><span>" + esc(b.method) + "</span></div></span>" +
-        '<span class="amt bill-amt-col"><span class="main' + (b.type === "income" ? ' inc-amt">+' : '">') + (b.currency === "RMB" ? rmbS(b.amount) : usdS(b.amount)) + '</span><button type="button" class="del-sm" data-bdel="' + esc(b.id) + '" aria-label="Remove ' + esc(b.name) + '">×</button></span></div>';
+        '<span class="amt bill-amt-col"><span class="main' + (b.type === "income" ? ' inc-amt">+' : '">') + typedText(b.amount, b.currency) + '</span><button type="button" class="del-sm" data-bdel="' + esc(b.id) + '" aria-label="Remove ' + esc(b.name) + '">×</button></span></div>';
     }).join("") : '<p class="hint" style="margin:0">No bills yet. Add rent, phone or subscriptions below, or open any entry and tap "Repeat this every month".</p>';
     box.querySelectorAll("[data-bdel]").forEach((b) => (b.onclick = () => {
       if (b.dataset.armed !== "1") { b.dataset.armed = "1"; b.textContent = "Remove?"; b.classList.add("armed"); return; }
@@ -678,13 +765,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     if (!favs.length || state.editId || state.form.type === "income") { box.hidden = true; return; }
     box.hidden = false;
     box.innerHTML = '<span class="cap">One tap to add again today</span><div class="chips">' +
-      favs.map((e, i) => '<button type="button" class="chip fav" data-i="' + i + '">' + tile(catById(e.cat), "ci") + '<span class="fr">' + esc(e.reason) + "</span><b>" + (e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount)) + "</b></button>").join("") + "</div>";
+      favs.map((e, i) => '<button type="button" class="chip fav" data-i="' + i + '">' + tile(catById(e.cat), "ci") + '<span class="fr">' + esc(e.reason) + "</span><b>" + typedText(e.amount, e.currency, e.rate) + "</b></button>").join("") + "</div>";
     box.querySelectorAll(".fav").forEach((b) => (b.onclick = () => quickAdd(favs[Number(b.dataset.i)], b)));
   }
   async function quickAdd(src, btn) {
-    const rate = state.config.rate, cur = src.currency === "USD" ? "USD" : "RMB", amount = Number(src.amount);
+    const rate = state.config.rate, cur = isIntl() || src.currency === "USD" ? "USD" : "RMB", amount = isIntl() ? round2(R(src)) : Number(src.amount);
     const e = { date: todayISO(), amount, currency: cur, rate, usd: round2(cur === "RMB" ? amount / rate : amount), rmb: round2(cur === "RMB" ? amount : amount * rate),
-      cat: src.cat, kind: src.kind || catById(src.cat).kind, reason: src.reason, method: src.method || state.form.method, note: "", createdAt: Date.now() };
+      cat: src.cat, kind: src.kind || catById(src.cat).kind, reason: src.reason, method: src.method && (!isIntl() || allMethods().includes(src.method)) ? src.method : state.form.method, note: "", createdAt: Date.now() };
     if (isRateGuess()) e.rateGuess = true;
     if (btn) btn.disabled = true;
     try {
@@ -698,10 +785,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     finally { if (btn) btn.disabled = false; }
   }
   function savedText(e, id) {
-    if (isInc(e)) return "Income added +" + (e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount) + " (" + rmb0(e.rmb) + ")");
-    let text = "Saved " + (e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount) + " (" + rmb0(e.rmb) + ")");
+    const shown = isIntl() ? rmb0(R(e)) : e.currency === "RMB" ? rmbS(e.amount) : usdS(e.amount) + " (" + rmb0(e.rmb) + ")";
+    if (isInc(e)) return "Income added +" + shown;
+    let text = "Saved " + shown;
     if (isFood(e.cat) && e.date === todayISO() && state.config.foodLimit > 0) {
-      const left = state.config.foodLimit - foodOn(e.date) - (state.expenses.some((x) => x.id === id || x.createdAt === e.createdAt) ? 0 : e.rmb);
+      const left = state.config.foodLimit - foodOn(e.date) - (state.expenses.some((x) => x.id === id || x.createdAt === e.createdAt) ? 0 : R(e));
       text += left >= 0 ? " · " + rmb0(left) + " food left today" : " · " + rmb0(-left) + " over food limit";
     }
     return text;
@@ -746,7 +834,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     returns: ["dividend", "interest", "investment return", "利息"],
     refund: ["refund", "cashback", "退款"]
   };
-  const METHOD_WORDS = [["WeChat Pay", ["wechat", "weixin", "微信"]], ["Alipay", ["alipay", "zhifubao", "支付宝"]], ["Cash", ["cash", "现金"]], ["Credit card", ["credit card", "credit"]], ["Bank transfer", ["transfer", "bank transfer", "转账"]], ["Bank card", ["card", "debit", "银行卡"]]];
+  const METHOD_WORDS_CN = [["WeChat Pay", ["wechat", "weixin", "微信"]], ["Alipay", ["alipay", "zhifubao", "支付宝"]], ["Cash", ["cash", "现金"]], ["Credit card", ["credit card", "credit"]], ["Bank transfer", ["transfer", "bank transfer", "转账"]], ["Bank card", ["card", "debit", "银行卡"]]];
+  // International: your own wallets first (by name), then cash and cards
+  const methodWords = () => (isIntl()
+    ? walletList().flatMap((w) => w.methods.map((m) => [m, [m.toLowerCase()]])).concat([["Cash", ["cash"]], ["Credit card", ["credit card", "credit", "debit", "card"]]])
+    : METHOD_WORDS_CN);
   // English words match whole ("cash" is not in "cashew", "bus" is not in "business"); longer ones may be a stem ("grocer" in "groceries")
   const reSafe = (w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const wordRe = (w, whole) => (/^[\x00-\x7f]+$/.test(w) ? new RegExp("(^|[^a-z])" + reSafe(w.trim()) + (whole || w.trim().length <= 4 ? "(?:s|es)?($|[^a-z])" : ""), "i") : new RegExp(reSafe(w)));
@@ -755,9 +847,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const text = normNum(rawText);
     const s = " " + text.toLowerCase() + " ";
     const out = { amount: amountInText(text) };
-    out.currency = /\$|usd|dollar|美元|美金/.test(s) ? "USD" : "RMB";
+    out.currency = isIntl() || /\$|usd|dollar|美元|美金/.test(s) ? "USD" : "RMB";
     out.method = null;
-    for (const [name, words] of METHOD_WORDS) if (words.some((w) => hasWord(s, w, true))) { out.method = name; break; }
+    for (const [name, words] of methodWords()) if (words.some((w) => hasWord(s, w, true))) { out.method = name; break; }
     const d = new Date();
     if (/day before yesterday|前天/.test(s)) d.setDate(d.getDate() - 2);
     else if (/yesterday|昨天/.test(s)) d.setDate(d.getDate() - 1);
@@ -766,7 +858,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     out.type = incHit || /\b(got paid|received|income|earned)\b|收入|收到/.test(s) ? "income" : "expense";
     let reason = text.replace(NUM_RE(), " ").replace(/[¥$]|\b(rmb|cny|yuan|usd|dollars?|kuai)\b/gi, " ")
       .replace(/\b(day before yesterday|yesterday|today|got paid|got|received|via|with|by|paid|on|for)\b|前天|昨天|今天/gi, " ");
-    METHOD_WORDS.forEach(([, ws]) => ws.forEach((w) => { const re = wordRe(w, true); reason = reason.replace(new RegExp(re.source, "gi"), (m, a, b) => (a || "") + " " + (b || "")); }));
+    methodWords().forEach(([, ws]) => ws.forEach((w) => { const re = wordRe(w, true); reason = reason.replace(new RegExp(re.source, "gi"), (m, a, b) => (a || "") + " " + (b || "")); }));
     reason = reason.replace(/\s+/g, " ").trim();
     out.reason = reason ? reason.charAt(0).toUpperCase() + reason.slice(1) : "";
     if (out.type === "income") { out.cat = incHit ? incHit[0] : "income_other"; return out; }
@@ -795,28 +887,30 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       "Expense sections (id = name):\n" + state.config.categories.map((c) => c.id + " = " + c.name).join("\n") + "\n\n" +
       "Income sources (id = name):\n" + state.config.incomeCats.map((c) => c.id + " = " + c.name).join("\n") + "\n\n" +
       "Payment methods (use exactly one of these or null): " + allMethods().join(", ") + "\n\n" +
-      "Rules: amounts without a currency are CNY (yuan, ¥, 元, 块, kuai). Use USD only for $, dollar, usd, 美元. Relative dates (yesterday, Monday, 3 days ago) become YYYY-MM-DD before or on today; default today. " +
+      (isIntl() ? "Rules: amounts without a currency are USD. Always answer with currency USD. Relative dates" : "Rules: amounts without a currency are CNY (yuan, ¥, 元, 块, kuai). Use USD only for $, dollar, usd, 美元. Relative dates") + " (yesterday, Monday, 3 days ago) become YYYY-MM-DD before or on today; default today. " +
       'type is "income" only for money received (salary, paid for a job, gift or red envelope received, refund, interest); otherwise "expense". ' +
       'For expenses, kind is "need", "want" or "save" (save only for savings or investing). reason is a short natural description of what it was or why, 2 to 6 words, in the same language as the note, without the amount or payment method. ' +
       "If unsure of the section, use other (or income_other for income).\n\n" +
-      (receipt ? "The image is a receipt or a payment screenshot (for example WeChat Pay or Alipay). Read the total actually paid, the shop or item as the reason, the date if shown, and the payment app if visible.\n\n" : "") +
-      'Reply with only JSON like {"type":"expense","amount":38,"currency":"RMB","cat":"dining","kind":"want","reason":"Lunch noodles","method":"WeChat Pay","date":"' + todayISO() + '"}.\n\n' +
+      (receipt ? "The image is a receipt or a payment screenshot" + (isIntl() ? "" : " (for example WeChat Pay or Alipay)") + ". Read the total actually paid, the shop or item as the reason, the date if shown, and the payment app if visible.\n\n" : "") +
+      (isIntl() ? 'Reply with only JSON like {"type":"expense","amount":12,"currency":"USD","cat":"dining","kind":"want","reason":"Lunch noodles","method":"Cash","date":"' : 'Reply with only JSON like {"type":"expense","amount":38,"currency":"RMB","cat":"dining","kind":"want","reason":"Lunch noodles","method":"WeChat Pay","date":"') + todayISO() + '"}.\n\n' +
       "Note: " + (text || "(no note, use the image)");
   }
   function applySmart(o) {
     if (!o || typeof o !== "object") return false;
     const type = o.type === "income" ? "income" : "expense";
     if (state.form.type !== type) setType(type);
-    const amount = Number(o.amount);
+    const asUsd = String(o.currency || "").toUpperCase() === "USD";
+    // International keeps everything in dollars: a yuan amount is turned into dollars at your rate
+    const amount = isIntl() && !asUsd ? Number(o.amount) / state.config.rate : Number(o.amount);
     if (amount > 0) $("f-amount").value = round2(amount);
-    setCurrency(String(o.currency || "").toUpperCase() === "USD" ? "USD" : "RMB");
+    setCurrency(asUsd ? "USD" : "RMB");
     const list = type === "income" ? state.config.incomeCats : state.config.categories;
     const cat = list.find((c) => c.id === String(o.cat)) || list.find((c) => c.id === (type === "income" ? "income_other" : "other"));
     if (cat) pickCat(cat.id);
     if (type === "expense" && KIND_LABEL[o.kind]) setKind(o.kind, false);
     if (o.reason) $("f-reason").value = String(o.reason).slice(0, 120);
     const method = allMethods().find((mm) => mm.toLowerCase() === String(o.method || "").toLowerCase());
-    state.form.method = method || state.form.method || DEFAULT_METHOD; renderMethodChips();
+    state.form.method = method || state.form.method || defaultMethod(); renderMethodChips();
     const date = String(o.date || "");
     if (/^\d{4}-\d{2}-\d{2}$/.test(date) && date <= todayISO()) { $("f-date").value = date; if (date !== todayISO()) $("more").open = true; }
     updateMoreSummary(); renderConvert();
@@ -824,7 +918,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   async function smartFill(file) {
     const text = $("smart-in").value.trim(), msg = $("smart-msg");
-    if (!text && !file) { msg.className = "smart-msg err"; msg.textContent = "Type something like: coffee 28 wechat"; return; }
+    if (!text && !file) { msg.className = "smart-msg err"; msg.textContent = isIntl() ? "Type something like: coffee 4.50 card" : "Type something like: coffee 28 wechat"; return; }
     msg.className = "smart-msg"; msg.textContent = file ? "Reading the receipt…" : "Filling in…";
     $("smart-go").disabled = true;
     let ok = false, used = "local";
@@ -915,6 +1009,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   }
   // Yuan is the default for every new entry; $ applies only to the entry you are typing.
   function setCurrency(cur) {
+    if (isIntl()) cur = "USD";
     state.form.currency = cur;
     document.querySelectorAll(".cur-toggle button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.cur === cur)));
     renderConvert();
@@ -926,6 +1021,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function renderConvert() {
     const n = parseAmt($("f-amount").value), rate = currentRate(), el = $("f-convert");
     const r = "¥" + rate.toFixed(2) + " = $1";
+    if (isIntl()) { el.textContent = ""; updateShopWarn(); return; }
     if (!(n > 0)) { el.textContent = (state.form.currency === "RMB" ? "Amount in yuan." : "Amount in dollars.") + " " + r; updateShopWarn(); return; }
     el.innerHTML = "= <strong>" + (state.form.currency === "RMB" ? usd(n / rate) : rmb(n * rate)) + "</strong> · " + r;
     updateShopWarn();
@@ -936,8 +1032,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("f-date").value = todayISO();
     setKind("need", false);
     setType("expense");
-    setCurrency("RMB");
-    state.form.method = DEFAULT_METHOD;
+    setCurrency(curDefault());
+    state.form.method = defaultMethod();
     $("smart").hidden = false; $("smart-in").value = ""; $("smart-msg").textContent = ""; $("smart-file").value = "";
     $("f-delete").hidden = true; $("f-repeat").hidden = true;
     $("f-submit").classList.remove("saved"); $("f-submit").textContent = "Save";
@@ -959,7 +1055,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const cats = state.config.categories.filter((c) => c.kind !== "save");
     return '<div class="card stack lim-form" id="lim-form"><div class="head"><h2>' + (l ? "Edit limit" : "New limit") + "</h2></div>" +
       '<div class="field"><label>Which sections?</label><div class="chips" id="lf-cats">' + cats.map((c) => '<button type="button" class="chip" data-lcat="' + esc(c.id) + '" aria-pressed="' + ed.cats.includes(c.id) + '">' + tile(c, "ci") + esc(c.name) + "</button>").join("") + "</div></div>" +
-      '<div class="lf-row"><div class="field"><label for="lf-amount">Limit, ¥</label><input class="input" id="lf-amount" inputmode="decimal" placeholder="e.g. 300" value="' + esc(ed.amount || "") + '"></div>' +
+      '<div class="lf-row"><div class="field"><label for="lf-amount">Limit, ' + mainSym() + '</label><input class="input" id="lf-amount" inputmode="decimal" placeholder="e.g. 300" value="' + esc(ed.amount || "") + '"></div>' +
       '<div class="field"><label>Every</label><div class="seg" id="lf-period" role="group"><button type="button" data-lp="week" aria-pressed="' + (ed.period === "week") + '">Week</button><button type="button" data-lp="month" aria-pressed="' + (ed.period !== "week") + '">Month</button></div></div></div>' +
       '<div class="field"><label for="lf-name">Name <span class="muted">(optional)</span></label><input class="input" id="lf-name" maxlength="40" placeholder="' + esc(ed.cats.length ? listJoin(ed.cats.map((id) => catById(id).name)) : "e.g. Shopping") + '" value="' + esc(ed.name || "") + '"></div>' +
       '<div class="form-msg" id="lf-msg"></div>' +
@@ -1005,11 +1101,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     html += '<div class="lim-sec"><h2>Your limits</h2>' + (state.limEdit ? "" : '<button type="button" class="btn small primary" id="lim-add">+ Add a limit</button>') + "</div>";
     if (state.limEdit && !state.limEdit.id) html += limitFormHTML();
     lims.forEach((l) => { html += state.limEdit && state.limEdit.id === l.id ? limitFormHTML() : limitCardHTML(l); });
-    if (!lims.length && !state.limEdit) html += '<div class="card empty-state">' + emptyArt("gauge") + '<h3>No limits yet</h3>Add one for any section, for example Shopping ¥300 a month or Health ¥100 a week. The app warns you before you go over.</div>';
+    if (!lims.length && !state.limEdit) html += '<div class="card empty-state">' + emptyArt("gauge") + '<h3>No limits yet</h3>Add one for any section, for example Shopping ' + mainSym() + (isIntl() ? "50" : "300") + ' a month or Health ' + mainSym() + (isIntl() ? "20" : "100") + ' a week. The app warns you before you go over.</div>';
     // 3. Waiting list
     const lat = state.config.later || [];
     const due = lat.filter((x) => x.forMonth && x.forMonth <= key), wait = lat.filter((x) => !(x.forMonth && x.forMonth <= key));
-    const rowL = (x) => { const c = catById(x.cat); return '<div class="later-row">' + tile(c, "ci") + '<span class="lr-t"><b>' + esc(x.reason || c.name) + "</b><small>" + esc(c.name) + " · added " + esc(dayShort(isoOf(new Date(x.addedAt || Date.now())))) + '</small></span><span class="lr-a">' + (x.currency === "USD" ? usdS(x.amount) : rmbS(x.amount)) + '</span><span class="lr-b"><button type="button" class="btn small primary" data-later-buy="' + esc(x.id) + '">Buy</button><button type="button" class="btn small" data-later-del="' + esc(x.id) + '">Remove</button></span></div>'; };
+    const rowL = (x) => { const c = catById(x.cat); return '<div class="later-row">' + tile(c, "ci") + '<span class="lr-t"><b>' + esc(x.reason || c.name) + "</b><small>" + esc(c.name) + " · added " + esc(dayShort(isoOf(new Date(x.addedAt || Date.now())))) + '</small></span><span class="lr-a">' + typedText(x.amount, x.currency) + '</span><span class="lr-b"><button type="button" class="btn small primary" data-later-buy="' + esc(x.id) + '">Buy</button><button type="button" class="btn small" data-later-del="' + esc(x.id) + '">Remove</button></span></div>'; };
     html += '<div class="card stack"><div class="head"><h2>Waiting list</h2><span class="hint">' + (lat.length ? rmb0(lat.reduce((a, x) => a + laterRmb(x), 0)) + " · not counted as spent" : "things you decided to buy later") + "</span></div>" +
       (due.length ? '<div class="later-h"><b>From last month</b><span class="muted">Do you still need them?</span></div>' + due.map(rowL).join("") : "") +
       (wait.length ? '<div class="later-h"><b>For ' + esc(monthName(wait[0].forMonth || shiftMonth(key, 1), { month: "long" })) + " 1 and after</b></div>" + wait.map(rowL).join("") : "") +
@@ -1073,9 +1169,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     resetForm();
     state.form.fromLater = id;
     setCurrency(x.currency);
-    $("f-amount").value = x.amount; $("f-reason").value = x.reason;
+    $("f-amount").value = isIntl() ? round2(mainOf(x.amount, x.currency, state.config.rate)) : x.amount; $("f-reason").value = x.reason;
     if (state.config.categories.some((c) => c.id === x.cat)) pickCat(x.cat);
-    state.form.method = allMethods().includes(x.method) ? x.method : DEFAULT_METHOD;
+    state.form.method = allMethods().includes(x.method) ? x.method : defaultMethod();
     $("smart").hidden = true;
     renderConvert();
     openSheet();
@@ -1090,7 +1186,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const n = parseAmt($("f-amount").value), btn = $("f-submit"), base = state.editId ? "Save changes" : "Save";
     const lims = (state.config.limits || []).filter((l) => state.form.cat && l.cats.includes(state.form.cat));
     if (!lims.length || state.form.type === "income" || !(n > 0)) { box.hidden = true; btn.textContent = base; return; }
-    const date = $("f-date").value || todayISO(), amt = state.form.currency === "USD" ? n * currentRate() : n;
+    const date = $("f-date").value || todayISO(), amt = mainOf(n, state.form.currency, currentRate());
     const orig = state.editId ? state.expenses.find((x) => x.id === state.editId) : null;
     // the limit this entry pushes furthest
     const rows = lims.map((l) => { const before = limSpent(l, date, state.editId), r = limRange(l, date); const same = orig && l.cats.includes(orig.cat) && orig.date >= r.start && orig.date <= r.end && amt <= R(orig) + 0.005; return { l, before, after: before + amt, same, r }; })
@@ -1128,7 +1224,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("smart").hidden = true;
     setType(isInc(e) ? "income" : "expense");
     setCurrency(e.currency === "USD" ? "USD" : "RMB");
-    $("f-amount").value = e.amount;
+    $("f-amount").value = isIntl() && e.currency !== "USD" ? round2(R(e)) : e.amount;
     $("f-date").value = e.date;
     $("f-reason").value = e.reason || "";
     $("f-note").value = e.note || "";
@@ -1216,7 +1312,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       }
       renderAll(); popSummary();
       // the amount shows beside the total for a moment, so you see what it did
-      if (!existing && state.view === "home") spendTick($("summary").firstElementChild, (income ? "+" : "−") + rmbS(cur === "RMB" ? e.amount : R(e)), income);
+      if (!existing && state.view === "home") spendTick($("summary").firstElementChild, (income ? "+" : "−") + rmbS(R(e)), income);
     } catch (err) {
       msg.textContent = err && err.code === "quota_exceeded" ? "Storage is full. Delete old entries to add more." : "Could not save. Check your connection and try again.";
     } finally { btn.disabled = false; }
@@ -1232,7 +1328,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     return '<button type="button" class="entry' + (e.id === state.justAdded ? " fresh" : "") + '" data-id="' + esc(e.id) + '" aria-label="Edit this expense">' + tile(c) +
       '<span style="min-width:0"><div class="reason' + (reason ? "" : " empty") + '">' + esc(reason || "No reason written") + "</div>" +
       '<div class="meta">' + (tm ? '<span class="tm">' + tm + "</span><span>·</span>" : grouped ? "" : "<span>" + esc(c.name) + "</span><span>·</span>") + "<span>" + esc(e.bill ? "Monthly bill" : e.method || "") + "</span>" + (e._pending ? '<span class="pend" title="Saved on this device, waiting to sync">⏳ waiting to sync</span>' : "") + "</div></span>" +
-      '<span class="amt"><div class="main' + (isInc(e) ? ' inc-amt">+' : isSave(e) ? '">' : ' out-amt">−') + rmbS(isR ? e.amount : R(e)) + '</div><div class="alt">' + (isInc(e) ? "+" : "") + (isR ? usd(U(e)) : usdS(e.amount)) + "</div></span></button>";
+      '<span class="amt"><div class="main' + (isInc(e) ? ' inc-amt">+' : isSave(e) ? '">' : ' out-amt">−') + rmbS(isIntl() || !isR ? R(e) : e.amount) + '</div><div class="alt">' + (isInc(e) ? "+" : "") + (isR ? usd(U(e)) : usdS(e.amount)) + "</div></span></button>";
   }
   const bindEntries = (root) => root.querySelectorAll(".entry[data-id]").forEach((b) => (b.onclick = () => startEdit(b.dataset.id)));
 
@@ -1417,7 +1513,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (!group.length) return;
       const out = group.filter(isSpend), inn = group.filter(isInc);
       const dr = out.reduce((a, e) => a + R(e), 0), du = out.reduce((a, e) => a + U(e), 0), di = inn.reduce((a, e) => a + R(e), 0);
-      html += '<div class="day-head"><span>' + esc(day === todayISO() ? "Today" : dayLabelY(day)) + '</span><span class="t">' + (out.length ? '<b class="out-amt">' + rmb0(dr) + "</b> · " + usd(du) : "") + (di > 0 ? (out.length ? " · " : "") + '<b class="inc-amt">+' + rmb0(di) + "</b> in" : "") + "</span></div>" + group.map(entryHTML).join("");
+      html += '<div class="day-head"><span>' + esc(day === todayISO() ? "Today" : dayLabelY(day)) + '</span><span class="t">' + (out.length ? '<b class="out-amt">' + rmb0(dr) + "</b>" + (isIntl() ? "" : " · " + usd(du)) : "") + (di > 0 ? (out.length ? " · " : "") + '<b class="inc-amt">+' + rmb0(di) + "</b> in" : "") + "</span></div>" + group.map(entryHTML).join("");
       group = [];
     };
     list.forEach((e) => { if (e.date !== day) { flush(); day = e.date; } group.push(e); });
@@ -1462,7 +1558,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const a = sum(days.slice(0, k + 1)), b = sum(prevDays.slice(0, k + 1));
     if (a.r === 0 && b.r === 0) return "";
     let cmp = "";
-    if (b.r > 0) { const d = Math.round(((a.r - b.r) / b.r) * 100); cmp = " · " + (Math.abs(d) < 3 ? "same as last week" : '<span class="' + (d > 0 ? "up" : "down") + '">' + (d > 0 ? "▲ " : "▼ ") + Math.abs(d) + "%</span> vs last week"); }
+    if (b.r > 0) { const d = Math.round(((a.r - b.r) / b.r) * 100); cmp = (isIntl() ? "" : " · ") + (Math.abs(d) < 3 ? "same as last week" : '<span class="' + (d > 0 ? "up" : "down") + '">' + (d > 0 ? "▲ " : "▼ ") + Math.abs(d) + "%</span> vs last week"); }
     let big = null;
     new Set(Object.keys(a.cat).concat(Object.keys(b.cat))).forEach((c) => { const d = (a.cat[c] || 0) - (b.cat[c] || 0); if (!big || Math.abs(d) > Math.abs(big.d)) big = { c, d }; });
     const max = Math.max(1, ...days.concat(prevDays).map((iso) => (byDate[iso] ? byDate[iso].r : 0)));
@@ -1491,7 +1587,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const n = key === curMonth() ? Number(todayISO().slice(8, 10)) : daysIn(key);
       let ok = 0, tracked = 0;
       for (let d = 1; d <= n; d++) { const iso = key + "-" + pad(d); if (state.expenses.some((e) => e.date === iso)) { tracked++; if (foodOn(iso) <= state.config.foodLimit) ok++; } }
-      if (tracked) out.push([ok === tracked ? "good" : ok / tracked >= 0.7 ? "info" : "bad", "¥", "Food stayed under " + rmb0(state.config.foodLimit) + " a day on <strong>" + ok + " of " + tracked + "</strong> days you logged."]);
+      if (tracked) out.push([ok === tracked ? "good" : ok / tracked >= 0.7 ? "info" : "bad", mainSym(), "Food stayed under " + rmb0(state.config.foodLimit) + " a day on <strong>" + ok + " of " + tracked + "</strong> days you logged."]);
     }
     const over = state.config.categories.filter((c) => c.budget > 0).map((c) => ({ c, spent: (s.byCat[c.id] || { rmb: 0 }).rmb })).filter((x) => x.spent > x.c.budget).sort((a, b) => (b.spent - b.c.budget) - (a.spent - a.c.budget));
     if (over.length) out.push(["bad", "!", "Over budget: " + over.slice(0, 3).map((x) => "<strong>" + esc(x.c.name) + "</strong> by " + rmb0(x.spent - x.c.budget)).join(", ") + "."]);
@@ -1566,7 +1662,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const fixed = s.list.filter(isFixed).reduce((a, e) => a + R(e), 0), flex = s.rmb - fixed;
       const amounts = s.list.map(R).sort((a, b) => a - b), n = amounts.length;
       const median = n % 2 ? amounts[(n - 1) / 2] : (amounts[n / 2 - 1] + amounts[n / 2]) / 2;
-      const small = amounts.filter((a) => a < 30), smallT = small.reduce((a, b) => a + b, 0);
+      const SMALL = isIntl() ? 5 : 30, small = amounts.filter((a) => a < SMALL), smallT = small.reduce((a, b) => a + b, 0);
       const firstE = state.expenses.reduce((a, e) => (e.date && (!a || e.date < a) ? e.date : a), "");
       const fromDay = firstE.slice(0, 7) === key ? Number(firstE.slice(8, 10)) : 1;
       const days = (key === curMonth() ? Number(todayISO().slice(8, 10)) : daysIn(key)) - fromDay + 1;
@@ -1579,7 +1675,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         '<div><div class="lbl">Expenses</div><div class="val">' + n + "</div><small>on " + spendDays + " of " + days + (fromDay > 1 ? " days since you started" : " days") + "</small></div>" +
         '<div><div class="lbl">Typical expense</div><div class="val">' + rmb0(median) + "</div><small>average " + rmb0(s.rmb / n) + "</small></div>" +
         '<div><div class="lbl">Largest single</div><div class="val">' + rmb0(amounts[n - 1]) + "</div><small>" + pct(amounts[n - 1], s.rmb) + "% of the month</small></div>" +
-        '<div><div class="lbl">Small buys under ¥30</div><div class="val">' + small.length + "</div><small>" + rmb0(smallT) + " in total</small></div>" +
+        '<div><div class="lbl">Small buys under ' + mainSym() + SMALL + '</div><div class="val">' + small.length + "</div><small>" + rmb0(smallT) + " in total</small></div>" +
         "</div></div>");
     }
     if (!out.length) return "";
@@ -1629,15 +1725,15 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     L.push("\nBiggest expenses: " + s.list.slice().sort((a, b) => R(b) - R(a)).slice(0, 6).map((e) => (e.reason || catById(e.cat).name) + " " + rmb0(R(e)) + " (" + e.date + ")").join("; "));
     const pm = Object.create(null); s.list.forEach((e) => { pm[e.method || "Other"] = (pm[e.method || "Other"] || 0) + R(e); });
     L.push("Payment methods: " + Object.entries(pm).sort((a, b) => b[1] - a[1]).map(([k, v]) => k + " " + rmb0(v)).join(", "));
-    if (state.config.bills.length) L.push("Monthly bills set up: " + state.config.bills.map((b) => b.name + " " + (b.currency === "RMB" ? rmb0(b.amount) : usd0(b.amount)) + (b.type === "income" ? " (income)" : "")).join(", "));
+    if (state.config.bills.length) L.push("Monthly bills set up: " + state.config.bills.map((b) => b.name + " " + typedText(b.amount, b.currency) + (b.type === "income" ? " (income)" : "")).join(", "));
     L.push("Exchange rate: 1 USD = " + state.config.rate + " CNY.");
     return L.join("\n");
   }
   function reviewPrompt(key) {
     return "You are a calm, practical personal finance advisor. Write a monthly money review for one person, based only on the data below. " +
-      "Amounts are Chinese yuan (¥). Be specific: use their real numbers, sections and reasons. No praise filler, no streaks or games, no generic tips that ignore the data, no investment product recommendations. " +
+      "Amounts are " + (isIntl() ? "US dollars ($)" : "Chinese yuan (¥)") + ". Be specific: use their real numbers, sections and reasons. No praise filler, no streaks or games, no generic tips that ignore the data, no investment product recommendations. " +
       "If the month is still in progress, say so and project the month end from the pace so far. If no income was recorded, say what that means for the review.\n\n" +
-      "Use plain text in exactly this format:\n## In one sentence\n(one sentence)\n## What stood out\n- 3 or 4 bullets\n## Where you could save\n- 2 or 3 bullets, each with a realistic ¥ amount per month\n## Plan for next month\n- 2 or 3 concrete actions, such as a suggested budget for a named section\n\n" +
+      "Use plain text in exactly this format:\n## In one sentence\n(one sentence)\n## What stood out\n- 3 or 4 bullets\n## Where you could save\n- 2 or 3 bullets, each with a realistic " + mainSym() + " amount per month\n## Plan for next month\n- 2 or 3 concrete actions, such as a suggested budget for a named section\n\n" +
       "Keep it under 230 words, in simple English.\n\nDATA\n" + reviewData(key);
   }
   function reviewCardHTML(key) {
@@ -2019,7 +2115,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   ];
   const wTile = (w) => '<span class="tile" style="--c:' + esc(w.color) + '">' + icon(w.icon) + "</span>";
   // Wallets keep their own currency. A $ wallet counts in dollars; totals convert it to yuan at your rate.
-  const wMoney = (w, n) => (wCur(w) === "USD" ? usd0(n) : rmb0(n));
+  const wMoney = (w, n) => (wCur(w) === "USD" ? usd0(n) : yuan0(n));
   const convert = (n, fromCur, toCur) => (fromCur === toCur ? n : fromCur === "USD" ? n * state.config.rate : n / state.config.rate);
   const walletOf = (method) => (state.config.wallets || []).find((w) => w.methods.includes(method));
   // A balance "on" a past day means it was true at the start of that day, so entries dated that day count.
@@ -2041,6 +2137,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function renderWallets() {
     const el = $("v-wallets"), ws = state.config.wallets;
     if (!state.configLoaded) { el.innerHTML = '<div class="card">' + skeletonRows(4) + "</div>"; return; }
+    if ((!ws || !ws.length) && isIntl()) {
+      el.innerHTML = '<div class="card empty-state">' + emptyArt("wallet") + '<h3>Add your first wallet</h3>Add each place you keep money: a bank account, cash, a card. The app keeps them up to date as you add entries.' +
+        '<div style="margin-top:14px"><button type="button" class="btn primary" id="wa-open">Add a wallet</button></div></div><div id="wa-card" hidden>' + addWalletCardHTML() + "</div>";
+      $("wa-open").onclick = () => { $("wa-card").hidden = false; $("wa-open").style.display = "none"; $("wa-name").focus(); };
+      bindAddWallet([]);
+      return;
+    }
     if (!ws || !ws.length) {
       el.innerHTML = '<div class="card stack"><div class="head"><h2>Set up your wallets</h2></div>' +
         '<p class="hint" style="margin:0">Type how much money is in each one right now. After that the app keeps them up to date: paying with WeChat Pay lowers WeChat, income received in Alipay raises Alipay, and so on. Leave 0 for any you do not use.</p>' +
@@ -2064,7 +2167,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const total = bals.reduce((a, x) => a + x.r, 0), pos = bals.filter((x) => x.r > 0), posT = pos.reduce((a, x) => a + x.r, 0);
     const usdHeld = bals.filter((x) => wCur(x.w) === "USD").reduce((a, x) => a + x.b, 0);
     const mk = curMonth();
-    let html = '<div class="card stack wtotal"><div><div class="cap">Total money</div><div class="big' + (total < 0 ? " out-amt" : "") + '" id="w-total">' + rmb0(total) + '</div><div class="usd" style="font-size:15px">' + usd(total / state.config.rate) + "</div>" + (usdHeld ? '<div class="hint" style="margin-top:4px">Includes ' + usd0(usdHeld) + " in dollar wallets, counted at ¥" + state.config.rate.toFixed(2) + " = $1.</div>" : "") + "</div>" +
+    let html = '<div class="card stack wtotal"><div><div class="cap">Total money</div><div class="big' + (total < 0 ? " out-amt" : "") + '" id="w-total">' + rmb0(total) + '</div><div class="usd" style="font-size:15px">' + usd(total / state.config.rate) + "</div>" + (usdHeld && !isIntl() ? '<div class="hint" style="margin-top:4px">Includes ' + usd0(usdHeld) + " in dollar wallets, counted at ¥" + state.config.rate.toFixed(2) + " = $1.</div>" : "") + "</div>" +
       (posT > 0 ? '<div class="wbar">' + pos.map((x) => '<div style="width:' + (x.r / posT) * 100 + "%;background:" + esc(x.w.color) + '" title="' + esc(x.w.name) + '"></div>').join("") + "</div>" : "") +
       '<div class="legend2">' + bals.map((x) => '<span><span class="dot" style="background:' + esc(x.w.color) + '"></span> ' + esc(x.w.name) + " <b>" + wMoney(x.w, x.b) + "</b></span>").join("") + "</div></div>";
     html += '<div class="card"><div class="head" style="margin-bottom:4px"><h2>Wallets</h2><span class="hint">tap one for details</span></div>' + bals.map(({ w, b, moves }) => {
@@ -2081,8 +2184,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
           '<div class="mrow" data-mgot-row hidden><span class="mlab" data-mgot-label>in</span><input class="input" inputmode="decimal" data-mgot aria-label="Amount received"></div><button type="button" class="btn small primary" data-wsave="move">Move</button><span class="hint" data-mnote hidden style="flex-basis:100%"></span></div>' : "") +
         "</div></details>";
     }).join("") + "</div>";
-    html += '<div class="card stack"><div class="head"><h2>Add a wallet</h2><span class="hint">a second bank, a savings box…</span></div><div class="wform"><input class="input" id="wa-name" maxlength="30" placeholder="Name, e.g. ICBC card"><select class="input" id="wa-cur" aria-label="Currency" style="flex:0 0 76px"><option value="RMB">¥</option><option value="USD">$</option></select><input class="input" id="wa-bal" inputmode="decimal" placeholder="Balance"><button type="button" class="btn primary" id="wa-add">Add</button></div>' +
-      '<p class="hint" style="margin:0">Choose $ for a dollar card or account. A new wallet also appears under "Paid with" when you add an expense. Credit card spending is not taken from a wallet.</p></div>';
+    html += addWalletCardHTML();
     el.innerHTML = html;
     const t = $("w-total"); if (t) countUp(t, "w-total", total, rmb0);
     // each wallet's balance rolls to its new value (a move between wallets shows on both)
@@ -2167,6 +2269,17 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         } catch (e) { toast("Could not save. Try again.", true); }
       };
     });
+    bindAddWallet(ws);
+  }
+  // the add-a-wallet form (International always uses dollars, so it has no currency switch)
+  function addWalletCardHTML() {
+    const intl = isIntl();
+    return '<div class="card stack"><div class="head"><h2>Add a wallet</h2><span class="hint">' + (intl ? "a bank account, cash, a card…" : "a second bank, a savings box…") + '</span></div><div class="wform"><input class="input" id="wa-name" maxlength="30" placeholder="' + (intl ? "Name, e.g. Chase checking" : "Name, e.g. ICBC card") + '">' +
+      (intl ? "" : '<select class="input" id="wa-cur" aria-label="Currency" style="flex:0 0 76px"><option value="RMB">¥</option><option value="USD">$</option></select>') +
+      '<input class="input" id="wa-bal" inputmode="decimal" placeholder="Balance"><button type="button" class="btn primary" id="wa-add">Add</button></div>' +
+      '<p class="hint" style="margin:0">' + (intl ? "" : "Choose $ for a dollar card or account. ") + 'A new wallet also appears under "Paid with" when you add an expense. Credit card spending is not taken from a wallet.</p></div>';
+  }
+  function bindAddWallet(ws) {
     $("wa-add").onclick = async () => {
       const name = $("wa-name").value.trim(), balText = $("wa-bal").value.trim(), bal = parseAmt(balText);
       if (!name) { toast("Give the wallet a name.", true); return; }
@@ -2174,7 +2287,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       // the name becomes the wallet's payment method, so it must not already be one of another wallet's methods
       if (ws.some((x) => x.name.toLowerCase() === name.toLowerCase() || x.methods.some((m) => m.toLowerCase() === name.toLowerCase()))) { toast("You already have a wallet with that name.", true); return; }
       const palette = ["#12A594", "#8B5CF6", "#E5487F", "#F07A2E", "#3E9BF0"];
-      const w = { id: "w" + uid(), name, icon: /bank|card|icbc|boc|ccb|abc|cmb/i.test(name) ? "w_bank" : "w_other", color: palette[ws.length % palette.length], methods: [name], currency: $("wa-cur").value === "USD" ? "USD" : "RMB", balance: isFinite(bal) ? round2(bal) : 0, setAt: Date.now() };
+      const w = { id: "w" + uid(), name, icon: /bank|card|icbc|boc|ccb|abc|cmb/i.test(name) ? "w_bank" : "w_other", color: palette[ws.length % palette.length], methods: [name], currency: isIntl() || ($("wa-cur") && $("wa-cur").value === "USD") ? "USD" : "RMB", balance: isFinite(bal) ? round2(bal) : 0, setAt: Date.now() };
       await saveWallets(ws.concat([w]), name + " added");
     };
     ["wa-name", "wa-bal"].forEach((id) => $(id).addEventListener("keydown", (ev) => { if (ev.key === "Enter") { ev.preventDefault(); $("wa-add").click(); } }));
@@ -2261,8 +2374,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // Paying back is not spending and getting paid back is not income, so debts never touch the monthly totals.
   const paidOf = (d) => (d.payments || []).reduce((a, p) => a + (Number(p.amount) || 0), 0);
   const leftOf = (d) => Math.max(0, round2(Number(d.amount) - paidOf(d)));
-  const toRmb = (d, amt) => (d.currency === "USD" ? amt * (Number(d.rate) || state.config.rate) : amt);
-  const dMoney = (d, amt) => (d.currency === "USD" ? usdS(amt) + " (≈" + rmb0(toRmb(d, amt)) + ")" : rmbS(amt));
+  const toRmb = (d, amt) => mainOf(amt, d.currency, Number(d.rate) || state.config.rate);
+  const dMoney = (d, amt) => (isIntl() ? usdS(toRmb(d, amt)) : d.currency === "USD" ? usdS(amt) + " (≈" + rmb0(toRmb(d, amt)) + ")" : rmbS(amt));
   const personKey = (n) => String(n || "").trim().toLowerCase();
   const AVATAR_COLORS = ["#4F6BED", "#F07A2E", "#2FA968", "#8B5CF6", "#E5487F", "#12A594", "#D9A11A", "#3E9BF0"];
   const avatar = (name) => { const k = personKey(name); let h = 0; for (const ch of k) h = (h * 31 + ch.charCodeAt(0)) >>> 0; const ini = String(name || "?").trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join("").toUpperCase() || "?"; return '<span class="avatar" style="--c:' + AVATAR_COLORS[h % AVATAR_COLORS.length] + '">' + esc(ini) + "</span>"; };
@@ -2312,7 +2425,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
             '<div class="dmeta">' + esc(dMoney(d, Number(d.amount))) + " from " + esc(shortDate(d.start)) + (walletName(d.wallet) ? " · " + (d.dir === "owed" ? "out of " : "into ") + esc(walletName(d.wallet)) : "") + ' · <span class="badge ' + i.cls + '">' + esc(i.text) + "</span>" + (d.example ? ' · <span class="badge">example</span>' : "") + "</div>" +
             (paid > 0 ? '<div class="prog"><i style="width:' + pc + '%"></i></div><div class="pays">' + d.payments.map((pp) => "<span>" + esc(shortDate(pp.date)) + ": paid " + esc(dMoney(d, Number(pp.amount))) + (walletName(pp.wallet) ? " · " + esc(walletName(pp.wallet)) : "") + "</span>").join("") + "</div>" : "") +
             '<div class="pay-row" hidden><label class="pr-l">' + (d.dir === "owed" ? "How much did " + esc(String(d.person).trim()) + " give back?" : "How much did you pay back?") + "</label>" +
-            '<div class="pr-amt"><input class="input" inputmode="decimal" enterkeyhint="done" placeholder="' + (d.currency === "USD" ? "$" : "¥") + ' amount" aria-label="Amount paid">' +
+            '<div class="pr-amt"><input class="input" inputmode="decimal" enterkeyhint="done" placeholder="' + (isIntl() || d.currency === "USD" ? "$" : "¥") + ' amount" aria-label="Amount paid">' +
             '<button type="button" class="chip" data-quick="all">All ' + esc(dMoney(d, left)) + "</button>" + (left >= 2 ? '<button type="button" class="chip" data-quick="half">Half ' + esc(dMoney(d, round2(left / 2))) + "</button>" : "") + "</div>" +
             walletSelect(d) + '<div class="pr-prev" aria-live="polite"></div>' +
             '<div class="pr-btns"><button type="button" class="btn primary" data-act="pay-save">Save payment</button><button type="button" class="btn" data-act="pay-cancel">Cancel</button></div></div>' +
@@ -2377,7 +2490,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const rb = box.querySelector('[data-act="remind"]');
       if (rb) rb.onclick = () => {
         const text = reminderText(d);
-        const done = () => toast("Reminder copied. Paste it in WeChat");
+        const done = () => toast(isIntl() ? "Reminder copied" : "Reminder copied. Paste it in WeChat");
         const fallback = () => { let ta = box.querySelector("textarea"); if (!ta) { ta = document.createElement("textarea"); ta.className = "input"; ta.rows = 3; ta.readOnly = true; box.appendChild(ta); } ta.value = text; ta.focus(); ta.select(); toast("Select the text and copy it", true); };
         try { navigator.clipboard.writeText(text).then(done, fallback); } catch (e) { fallback(); }
       };
@@ -2424,7 +2537,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const walletName = (id) => { const w = id && (state.config.wallets || []).find((x) => x.id === id); return w ? w.name : ""; };
   // what a debt amount comes to in that wallet's own money: a dollar wallet shows dollars
   const inWalletText = (id, d, amt) => { const w = (state.config.wallets || []).find((x) => x.id === id); return w ? wMoney(w, inWalletCur(w, d, amt)) : ""; };
-  const defaultWallet = () => { const ws = state.config.wallets || []; const byMethod = walletOf(DEFAULT_METHOD); return (byMethod || ws[0] || { id: "" }).id; };
+  const defaultWallet = () => { const ws = state.config.wallets || []; const byMethod = walletOf(defaultMethod()); return (byMethod || ws[0] || { id: "" }).id; };
   // wallet picker for a pay-back: the debt's own wallet first, then the others, then "No wallet"
   // wallet buttons for a pay-back: the debt's own wallet is picked first; a debt without one starts on Alipay
   function walletSelect(d) {
@@ -2451,7 +2564,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     state.debtEditId = d ? d.id : null;
     $("d-title").textContent = d ? "Edit debt" : "Add debt";
     dForm.wallet = d ? (d.wallet && (state.config.wallets || []).some((w) => w.id === d.wallet) ? d.wallet : "") : defaultWallet();
-    setDebtDir(d ? d.dir : "owed"); setDebtCur(d && d.currency === "USD" ? "USD" : "RMB");
+    setDebtDir(d ? d.dir : "owed"); setDebtCur(d ? (d.currency === "USD" ? "USD" : "RMB") : curDefault());
     $("d-person").value = d ? d.person : ""; $("d-amount").value = d ? d.amount : ""; $("d-reason").value = d ? d.reason || "" : "";
     $("d-start").value = d ? d.start : todayISO(); $("d-due").value = d ? d.due || "" : ""; $("d-msg").textContent = "";
     const names = Object.create(null); state.debts.forEach((x) => { names[personKey(x.person)] = String(x.person).trim(); });
@@ -2540,6 +2653,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       incomeCats: draftIncs.map((c) => ({ ...c })), categories: draftCats.map((c) => ({ ...c })) };
   }
   function renderSettings() {
+    mountModeSettings();
     $("s-food").value = state.config.foodLimit || 0;
     const lc = (state.config.limits || []).length;
     $("s-lim-hint").textContent = lc ? lc + (lc === 1 ? " limit: " : " limits: ") + state.config.limits.map((l) => limName(l) + " " + rmb0(l.amount) + " a " + limWord(l)).join(", ") + ". Add, change or delete them on the Limits screen." : "Set limits for any section, per week or per month, on the Limits screen.";
@@ -2564,7 +2678,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       '<input type="color" id="sc-color-' + i + '" value="' + esc(c.color) + '" aria-label="Color for ' + esc(c.name) + '">' +
       '<input class="input" id="sc-name-' + i + '" value="' + esc(c.name) + '" maxlength="40" aria-label="Section name">' +
       '<select class="input kind-sel" id="sc-kind-' + i + '" aria-label="Type">' + Object.entries(KIND_LABEL).map(([k, l]) => '<option value="' + k + '"' + (c.kind === k ? " selected" : "") + ">" + l + "</option>").join("") + "</select>" +
-      '<input class="input bud" id="sc-bud-' + i + '" inputmode="decimal" value="' + (c.budget || 0) + '" aria-label="Monthly budget in yuan">' +
+      '<input class="input bud" id="sc-bud-' + i + '" inputmode="decimal" value="' + (c.budget || 0) + '" aria-label="Monthly budget">' +
       '<button type="button" class="del" aria-label="Remove ' + esc(c.name) + '" data-del="' + i + '">×</button></div>').join("");
     box.querySelectorAll("input,select").forEach((inp) => (inp.oninput = () => { state.settingsDirty = true; readCatRows(); }));
     box.querySelectorAll("[data-del]").forEach((b) => (b.onclick = () => {
@@ -2650,6 +2764,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     ".s-split{display:flex;height:10px;border-radius:99px;overflow:hidden;gap:2px;margin:4px 0 8px}" +
     ".s-two{display:grid;grid-template-columns:1fr 1fr;gap:16px}" +
     ".tag{font-size:9.5px;font-weight:800;padding:1px 6px;border-radius:99px;background:#F2F2F5;color:#6E6E76}.tag.in{background:#E3F5EA;color:#1C9A55}";
+  const mainCol = () => (isIntl() ? "Dollars" : "Yuan"), otherCol = () => (isIntl() ? "" : "Dollars");
+  const u2 = (n) => (isIntl() ? "" : usd(n)), u0 = (n) => (isIntl() ? "" : usd0(n));
   const LOGO_SVG = '<svg viewBox="0 0 1024 1024"><g fill="none" stroke="#fff" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"><path d="M352 300 512 515 672 300M512 515v255M392 570h240M392 680h240"/></g><circle cx="780" cy="250" r="56" fill="#46C77F"/></svg>';
 
   function statementBlocks(key) {
@@ -2658,8 +2774,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const rate = s.inc > 0 ? pct(s.inc - s.rmb, s.inc) : null;
     const kpi = (l, v, u, cls) => '<div class="s-kpi"><div class="l">' + l + '</div><div class="v ' + (cls || "") + '">' + v + '</div><div class="u">' + u + "</div></div>";
     blocks.push('<div class="s-head"><div><div class="s-brand">' + LOGO_SVG + 'Money Ledger</div><div class="s-title">Monthly statement</div><div class="s-sub">' + esc(mName) + (key === curMonth() ? " · month in progress, up to " + esc(dayLabel(todayISO())) : "") + "</div></div>" +
-      '<div class="s-meta">Prepared <b>' + esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })) + "</b><br>Main currency: <b>Chinese yuan (¥)</b><br>Exchange rate: <b>¥" + state.config.rate.toFixed(2) + " = $1</b><br>" + nOf(s.count, "entry", "entries") + "</div></div>");
-    blocks.push('<div class="s-kpis">' + kpi("Money in", rmb0(s.inc), usd(s.incU), "g") + kpi("Money out (spent)", rmb0(s.rmb), usd(s.usd)) + kpi("Moved to savings", rmb0(s.saved), usd(s.savedU)) + kpi("Left", rmb0(s.left), usd(s.leftU), s.left < 0 ? "r" : "") + "</div>");
+      '<div class="s-meta">Prepared <b>' + esc(new Date().toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })) + "</b><br>Main currency: <b>" + (isIntl() ? "US dollars ($)" : "Chinese yuan (¥)") + "</b><br>" + (isIntl() ? "" : "Exchange rate: <b>¥" + state.config.rate.toFixed(2) + " = $1</b><br>") + nOf(s.count, "entry", "entries") + "</div></div>");
+    blocks.push('<div class="s-kpis">' + kpi("Money in", rmb0(s.inc), u2(s.incU), "g") + kpi("Money out (spent)", rmb0(s.rmb), u2(s.usd)) + kpi("Moved to savings", rmb0(s.saved), u2(s.savedU)) + kpi("Left", rmb0(s.left), u2(s.leftU), s.left < 0 ? "r" : "") + "</div>");
     const notes = [];
     if (rate != null) notes.push("Savings rate <b class='" + (rate >= 20 ? "g" : "r") + "'>" + rate + "%</b> of income (saved plus left over).");
     if (prev.rmb > 0) { const d = Math.round(((s.rmb - prev.rmb) / prev.rmb) * 100); notes.push("Spending is <b>" + (Math.abs(d) < 3 ? "about the same as" : Math.abs(d) + "% " + (d > 0 ? "higher than" : "lower than")) + "</b> " + esc(monthName(shiftMonth(key, -1), { month: "long" })) + " (" + rmb0(prev.rmb) + ")."); }
@@ -2669,24 +2785,24 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     // Money in
     const incRows = Object.entries(s.byInc).sort((a, b) => b[1].rmb - a[1].rmb);
     blocks.push('<div class="s-sec"><h3>Where money came from <span>' + rmb0(s.inc) + " · " + nOf(s.incList.length, "entry", "entries") + "</span></h3>" +
-      (incRows.length ? '<table class="s-t"><thead><tr><th>Source</th><th>Details</th><th class="n">Entries</th><th class="n">Share</th><th class="n">Yuan</th><th class="n">Dollars</th></tr></thead><tbody>' +
-        incRows.map(([cid, v]) => { const c = catById(cid); return '<tr><td><span class="dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="w m">' + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 3).map((r) => r.label).join(", ")) + '</td><td class="n">' + v.count + '</td><td class="n">' + pct(v.rmb, s.inc) + '%</td><td class="n g"><b>+' + rmb0(v.rmb) + '</b></td><td class="n m">' + usd0(v.usd) + "</td></tr>"; }).join("") +
-        '<tr class="tot"><td>Total in</td><td></td><td class="n">' + s.incList.length + '</td><td></td><td class="n g">+' + rmb0(s.inc) + '</td><td class="n">' + usd0(s.incU) + "</td></tr></tbody></table>"
+      (incRows.length ? '<table class="s-t"><thead><tr><th>Source</th><th>Details</th><th class="n">Entries</th><th class="n">Share</th><th class="n">' + mainCol() + '</th><th class="n">' + otherCol() + '</th></tr></thead><tbody>' +
+        incRows.map(([cid, v]) => { const c = catById(cid); return '<tr><td><span class="dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="w m">' + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 3).map((r) => r.label).join(", ")) + '</td><td class="n">' + v.count + '</td><td class="n">' + pct(v.rmb, s.inc) + '%</td><td class="n g"><b>+' + rmb0(v.rmb) + '</b></td><td class="n m">' + u0(v.usd) + "</td></tr>"; }).join("") +
+        '<tr class="tot"><td>Total in</td><td></td><td class="n">' + s.incList.length + '</td><td></td><td class="n g">+' + rmb0(s.inc) + '</td><td class="n">' + u0(s.incU) + "</td></tr></tbody></table>"
         : '<div class="s-note m">No income recorded for this month.</div>') + "</div>");
 
     // Money out
     const outRows = Object.entries(s.byCat).sort((a, b) => b[1].rmb - a[1].rmb);
     const maxOut = Math.max(1, ...outRows.map(([, v]) => v.rmb));
     blocks.push('<div class="s-sec"><h3>Where money went <span>' + rmb0(s.rmb) + " spent · " + nOf(s.list.length, "entry", "entries") + "</span></h3>" +
-      (outRows.length ? '<table class="s-t"><thead><tr><th>Section</th><th>Main reasons</th><th></th><th class="n">Share</th><th class="n">vs last month</th><th class="n">Yuan</th><th class="n">Dollars</th></tr></thead><tbody>' +
+      (outRows.length ? '<table class="s-t"><thead><tr><th>Section</th><th>Main reasons</th><th></th><th class="n">Share</th><th class="n">vs last month</th><th class="n">' + mainCol() + '</th><th class="n">' + otherCol() + '</th></tr></thead><tbody>' +
         outRows.map(([cid, v]) => {
           const c = catById(cid), p = (prev.byCat[cid] || { rmb: 0 }).rmb, d = v.rmb - p;
           return '<tr><td><span class="dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="w m">' + esc(reasonsFor(v.items).filter((r) => r.label !== NO_REASON).slice(0, 2).map((r) => r.label + (r.n > 1 ? " ×" + r.n : "")).join(", ")) +
             '</td><td><div class="bar"><i style="width:' + (v.rmb / maxOut) * 100 + "%;background:" + esc(c.color) + '"></i></div></td><td class="n">' + pct(v.rmb, s.rmb) + '%</td><td class="n ' + (prev.rmb > 0 ? (d > 0.5 ? "r" : d < -0.5 ? "g" : "m") : "m") + '">' + (prev.rmb > 0 ? (Math.abs(d) < 0.5 ? "same" : (d > 0 ? "+" : "−") + rmb0(Math.abs(d))) : "—") +
-            '</td><td class="n"><b>' + rmb0(v.rmb) + '</b></td><td class="n m">' + usd0(v.usd) + "</td></tr>";
+            '</td><td class="n"><b>' + rmb0(v.rmb) + '</b></td><td class="n m">' + u0(v.usd) + "</td></tr>";
         }).join("") +
-        (s.saved > 0 ? '<tr><td><span class="dot" style="background:#1C9A55"></span>Moved to savings</td><td class="w m">not counted as spending</td><td></td><td></td><td></td><td class="n"><b>' + rmb0(s.saved) + '</b></td><td class="n m">' + usd0(s.savedU) + "</td></tr>" : "") +
-        '<tr class="tot"><td>Total out</td><td></td><td></td><td></td><td></td><td class="n">' + rmb0(s.rmb + s.saved) + '</td><td class="n">' + usd0(s.usd + s.savedU) + "</td></tr></tbody></table>"
+        (s.saved > 0 ? '<tr><td><span class="dot" style="background:#1C9A55"></span>Moved to savings</td><td class="w m">not counted as spending</td><td></td><td></td><td></td><td class="n"><b>' + rmb0(s.saved) + '</b></td><td class="n m">' + u0(s.savedU) + "</td></tr>" : "") +
+        '<tr class="tot"><td>Total out</td><td></td><td></td><td></td><td></td><td class="n">' + rmb0(s.rmb + s.saved) + '</td><td class="n">' + u0(s.usd + s.savedU) + "</td></tr></tbody></table>"
         : '<div class="s-note m">No spending recorded for this month.</div>') + "</div>");
 
     // Needs / wants / savings + payment methods
@@ -2708,9 +2824,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const rows = s.all.slice().sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0))).map((e) => {
       const c = catById(e.cat), inc = isInc(e);
       return "<tr><td>" + esc(shortDate(e.date)) + '</td><td><span class="tag' + (inc ? " in" : "") + '">' + (inc ? "IN" : isSave(e) ? "SAVE" : "OUT") + '</span></td><td><span class="dot" style="background:' + esc(c.color) + '"></span>' + esc(c.name) + '</td><td class="w">' + esc(e.reason || "—") + '</td><td class="m">' + esc(e.bill ? "Monthly bill" : e.method || "") +
-        '</td><td class="n ' + (inc ? "g" : "") + '"><b>' + (inc ? "+" : "") + rmb(R(e)) + '</b></td><td class="n m">' + (e.currency === "USD" ? "$" + fmt(Number(e.amount)) : usd(U(e))) + "</td></tr>";
+        '</td><td class="n ' + (inc ? "g" : "") + '"><b>' + (inc ? "+" : "") + rmb(R(e)) + '</b></td><td class="n m">' + (isIntl() ? "" : e.currency === "USD" ? "$" + fmt(Number(e.amount)) : usd(U(e))) + "</td></tr>";
     });
-    return { blocks, rows, total: '<tr class="tot"><td colspan="5">Net for the month (in − out − savings)</td><td class="n ' + (s.left < 0 ? "r" : "g") + '">' + rmb(s.left) + '</td><td class="n">' + usd(s.leftU) + "</td></tr>" };
+    return { blocks, rows, total: '<tr class="tot"><td colspan="5">Net for the month (in − out − savings)</td><td class="n ' + (s.left < 0 ? "r" : "g") + '">' + rmb(s.left) + '</td><td class="n">' + u2(s.leftU) + "</td></tr>" };
   }
 
   async function makeStatement(key, btn) {
@@ -2739,7 +2855,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         if (over(body) && body.children.length > 1) { body.removeChild(el); body = newPage(); body.appendChild(el); }
       }
       // All entries table, continued across pages with its header repeated
-      const tableHead = '<thead><tr><th>Date</th><th></th><th>Section</th><th>Reason</th><th>Paid / received</th><th class="n">Yuan</th><th class="n">Dollars</th></tr></thead>';
+      const tableHead = '<thead><tr><th>Date</th><th></th><th>Section</th><th>Reason</th><th>Paid / received</th><th class="n">' + mainCol() + '</th><th class="n">' + otherCol() + '</th></tr></thead>';
       const startTable = (title) => { const sec = document.createElement("div"); sec.className = "s-sec"; sec.innerHTML = "<h3>" + title + '</h3><table class="s-t">' + tableHead + "<tbody></tbody></table>"; body.appendChild(sec); return sec; };
       let sec = startTable("All entries <span>" + rows.length + " in date order</span>");
       if (over(body)) { body.removeChild(sec); body = newPage(); sec = startTable("All entries <span>" + rows.length + " in date order</span>"); }
@@ -2827,7 +2943,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const e = state.expenses.find((x) => x.id === state.editId);
       if (!e) return;
       const day = Number(e.date.slice(8, 10)), key = curMonth();
-      const b = { id: "b" + uid(), type: isInc(e) ? "income" : "expense", name: (e.reason || "").trim() || catById(e.cat).name, cat: e.cat, amount: Number(e.amount), currency: e.currency === "USD" ? "USD" : "RMB", day, method: e.method || DEFAULT_METHOD };
+      const b = { id: "b" + uid(), type: isInc(e) ? "income" : "expense", name: (e.reason || "").trim() || catById(e.cat).name, cat: e.cat, amount: isIntl() ? round2(R(e)) : Number(e.amount), currency: isIntl() || e.currency === "USD" ? "USD" : "RMB", day, method: e.method || defaultMethod() };
       if (e.date.slice(0, 7) === key) { const rid = "bill-" + b.id + "-" + key; billsDone.add(rid); try { await store.markBillRun(rid); } catch (err) {} }
       if (await saveBills(state.config.bills.concat([b]), "Repeats on the " + ordinal(day) + " of every month")) closeSheet();
     };
@@ -2869,7 +2985,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (!(round2(amount) > 0)) { msg.textContent = "Enter the amount."; return; }
       if (!(day >= 1 && day <= 31)) { msg.textContent = "Enter the day of the month it is paid (1 to 31)."; return; }
       msg.textContent = "";
-      const b = { id: "b" + uid(), name, cat: $("b-cat").value, amount: round2(amount), currency: $("b-cur").value, day, method: $("b-method").value || DEFAULT_METHOD };
+      const b = { id: "b" + uid(), name, cat: $("b-cat").value, amount: round2(amount), currency: isIntl() ? "USD" : $("b-cur").value, day, method: $("b-method").value || defaultMethod() };
       if (await saveBills(state.config.bills.concat([b]), "Bill added. It repeats on the " + ordinal(day) + " each month")) { $("b-name").value = ""; $("b-amount").value = ""; $("b-day").value = ""; }
     };
     $("x-month").onclick = () => exportCSV(false);

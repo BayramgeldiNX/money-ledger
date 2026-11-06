@@ -89,12 +89,13 @@
         <p class="hint" style="margin:0">Auto follows your phone. Saved on this device only.</p>
       </div>
       <div class="card stack" id="acct-card"></div>
+      <div class="card stack" id="mode-card" hidden></div>
       <div class="card stack" id="install-card" hidden></div>
       <div class="card stack" id="lock-card" hidden></div>
       <div class="card stack">
         <div class="head"><h2>Daily food limit</h2></div>
         <div class="field">
-          <label for="s-food">Yuan per day (0 turns it off)</label>
+          <label for="s-food" id="s-food-l">Yuan per day (0 turns it off)</label>
           <input class="input" id="s-food" inputmode="decimal">
         </div>
         <p class="hint" style="margin:0" id="s-food-hint"></p>
@@ -104,7 +105,7 @@
         <p class="hint" style="margin:0" id="s-lim-hint"></p>
         <button type="button" class="btn" id="s-go-limits" style="align-self:flex-start">Open Limits</button>
       </div>
-      <div class="card stack">
+      <div class="card stack" id="rate-card">
         <div class="head"><h2>Exchange rate</h2></div>
         <div class="field">
           <label for="s-rate">How many yuan is $1?</label>
@@ -130,8 +131,8 @@
       <span class="form-msg" id="b-msg" role="status"></span>
     </div>
     <div class="card stack">
-      <div class="head"><h2>Sections and monthly budgets</h2><span class="hint">Budget in ¥. Leave 0 for none.</span></div>
-      <div class="cat-row cat-head"><span></span><span>Name</span><span>Type</span><span>Budget (¥)</span><span></span></div>
+      <div class="head"><h2>Sections and monthly budgets</h2><span class="hint" id="s-bud-hint">Budget in ¥. Leave 0 for none.</span></div>
+      <div class="cat-row cat-head"><span></span><span>Name</span><span>Type</span><span id="s-bud-col">Budget (¥)</span><span></span></div>
       <div class="cat-table" id="s-cats"></div>
       <div><button type="button" class="btn" id="s-addcat">+ Add section</button></div>
     </div>

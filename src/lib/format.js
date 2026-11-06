@@ -8,10 +8,19 @@ export const sign = (n, s) => (round2(n) < 0 ? "-" : "") + s;
 export const usd = (n) => sign(n, "$") + fmt(Math.abs(n));
 export const usd0 = (n) => sign(n, "$") + smart(n);
 export const usdS = usd0;
-export const rmb = (n) => sign(n, "¥") + fmt(Math.abs(n));
-export const rmb0 = (n) => sign(n, "¥") + smart(n);
+// "Main money" is the number shown big: yuan (default) or dollars (International mode).
+// The names rmb, rmb0, rmbS and compactRmb are old; they print the MAIN money with its symbol.
+// yuan / yuan0 always print ¥ (for the real yuan of a yuan wallet or entry).
+let MAIN = "RMB";
+export const setMainCur = (c) => { MAIN = c === "USD" ? "USD" : "RMB"; };
+export const mainCur = () => MAIN;
+export const mainSym = () => (MAIN === "USD" ? "$" : "¥");
+export const rmb = (n) => sign(n, mainSym()) + fmt(Math.abs(n));
+export const rmb0 = (n) => sign(n, mainSym()) + smart(n);
 export const rmbS = rmb0;
-export const compactRmb = (v) => (v >= 10000 ? "¥" + Math.round(v / 1000) + "k" : v >= 1000 ? "¥" + (v / 1000).toFixed(1).replace(/\.0$/, "") + "k" : "¥" + Math.round(v));
+export const yuan = (n) => sign(n, "¥") + fmt(Math.abs(n));
+export const yuan0 = (n) => sign(n, "¥") + smart(n);
+export const compactRmb = (v) => { const m = mainSym(); return v >= 10000 ? m + Math.round(v / 1000) + "k" : v >= 1000 ? m + (v / 1000).toFixed(1).replace(/\.0$/, "") + "k" : m + Math.round(v); };
 
 // Chinese keyboards can type full-width digits and punctuation: "１２，８", "12。8", "¥12"
 export const normNum = (s) => String(s == null ? "" : s).normalize("NFKC").replace(/。/g, ".").replace(/−/g, "-");
