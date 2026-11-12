@@ -148,3 +148,18 @@ describe("moving money between wallets", () => {
     expect(buildTransfer({ from: "a", to: "b", amount: 10.005, amountTo: 1.4949, today: "d", now: 1 })).toMatchObject({ amount: 10.01, amountTo: 1.49 });
   });
 });
+
+describe("entries with tax and tip", () => {
+  const base = { date: "2026-11-01", currency: "USD", rate: RATE, cat: "dining", kind: "need", reason: "Lunch", method: "Cash", createdAt: 1 };
+  it("keeps tax and tip when above zero", () => {
+    const e = buildEntry({ ...base, amount: 51.55, tax: 3.55, tip: 8 });
+    expect(e.amount).toBe(51.55);
+    expect(e.tax).toBe(3.55);
+    expect(e.tip).toBe(8);
+  });
+  it("has no tax/tip keys without them", () => {
+    const e = buildEntry({ ...base, amount: 40, tax: 0 });
+    expect("tax" in e).toBe(false);
+    expect("tip" in e).toBe(false);
+  });
+});

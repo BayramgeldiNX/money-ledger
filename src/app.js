@@ -14,7 +14,8 @@ import { limEntries as limEntriesOf, limSpent as limSpentOf, limStatus, anyOver,
 import { firstEntryDate, daysSoFar, pctChange, isSamePct, monthPace, weekStats as weekStatsOf } from "./lib/report.js";
 import { buildBackup, newEntryCount, planRestore, applyRestorePlan } from "./lib/backup.js";
 import { openStore, browserStorage } from "./store.js";
-import { KIND_LABEL, normalizeConfig, intlStart, isBlankAccount } from "./lib/config.js";
+import { KIND_LABEL, normalizeConfig, intlStart, isBlankAccount, withTaxSections } from "./lib/config.js";
+import { hasTaxTip, TAX_CAT, TAX_REASONS, pctOf, mealTotal, mealParts, taxMonth } from "./lib/tip.js";
 import { uid } from "./lib/ids.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -166,7 +167,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   async function changeMode(newMode) {
     if (!state.configLoaded) { toast("Your settings are still loading. Try again in a moment.", true); return; }
     try {
-      await store.saveConfig({ ...state.config, mode: newMode === "intl" ? "intl" : "cn" });
+      await store.saveConfig({ ...state.config, mode: newMode === "intl" ? "intl" : "cn", ...(newMode === "intl" ? withTaxSections(state.config) : {}) });
       renderAll("force"); mountModeSettings();
       toast(newMode === "intl" ? "Now in dollars" : "Now in yuan");
     } catch (e) { toast("Could not save. Try again.", true); }
@@ -752,6 +753,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     state.form.cat = null;
     renderCatChips(); renderMethodChips(); renderFavs(); updateMoreSummary();
     $("f-msg").textContent = "";
+    updateTaxTip();
     updateShopWarn();
   }
   function renderCatChips() {
@@ -796,7 +798,42 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       .forEach((e) => { const k = e.reason.trim(); if (k && !seen[k.toLowerCase()]) seen[k.toLowerCase()] = k; });
     $("reason-suggest").innerHTML = Object.values(seen).slice(0, 12).map((r) => '<option value="' + esc(r) + '"></option>').join("");
     $("f-msg").textContent = "";
+    updateTaxTip();
     updateShopWarn();
+  }
+  // Tax and tip rows (International, Food and Coffee only). The amount box is the bill before tax.
+  // The money itself comes from src/lib/tip.js; this only reads the boxes and shows the result.
+  const taxTipOn = () => isIntl() && state.form.type !== "income" && hasTaxTip(state.form.cat);
+  const typedPart = (id) => { const t = $(id).value.trim(); return t ? parseAmt(t) : 0; };
+  // { on, bill, tax, tip, total, bad } for the form as it is now; bad = a typed tax or tip is not a number
+  function taxTipOf() {
+    const bill = parseAmt($("f-amount").value);
+    if (!taxTipOn()) return { on: false, bill, tax: 0, tip: 0, total: bill, bad: false };
+    const sel = state.form.tipSel || "none";
+    const tax = typedPart("f-tax");
+    const tip = sel === "none" ? 0 : sel === "custom" ? typedPart("f-tip") : pctOf(bill, Number(sel));
+    const bad = !(tax >= 0) || !(tip >= 0);
+    return { on: true, bill, tax: bad ? 0 : tax, tip: bad ? 0 : tip, total: bill > 0 ? mealTotal(bill, tax, tip) : 0, bad };
+  }
+  function updateTaxTip() {
+    const box = $("f-taxtip"), on = taxTipOn();
+    box.hidden = !on;
+    const tr = $("f-tax-reasons"), isTax = state.form.type !== "income" && state.form.cat === TAX_CAT;
+    tr.hidden = !isTax;
+    if (isTax && !tr.firstChild) {
+      tr.innerHTML = TAX_REASONS.map((r) => '<button type="button" class="chip plain" data-treason="' + esc(r) + '">' + esc(r) + "</button>").join("");
+      tr.querySelectorAll(".chip").forEach((b) => (b.onclick = () => { $("f-reason").value = b.dataset.treason; $("f-msg").textContent = ""; }));
+    }
+    if (!on) { $("f-total").hidden = true; return; }
+    const sel = state.form.tipSel || "none", bill = parseAmt($("f-amount").value) || 0;
+    box.querySelectorAll("[data-tip]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.tip === sel)));
+    $("f-tip-custom").hidden = sel !== "custom";
+    // the tax follows the bill until the owner types their own
+    if (!state.form.taxTouched) { const t = pctOf(bill, state.config.salesTaxPct); $("f-tax").value = t > 0 ? t : ""; }
+    const r = taxTipOf(), line = $("f-total");
+    if (r.bad || !(r.bill > 0) || !(r.tax > 0 || r.tip > 0)) { line.hidden = true; return; }
+    line.hidden = false;
+    line.innerHTML = esc(usd0(r.bill)) + (r.tax > 0 ? " + " + esc(usd0(r.tax)) + " tax" : "") + (r.tip > 0 ? " + " + esc(usd0(r.tip)) + " tip" : "") + ' = <strong class="out-amt">' + esc(usd0(r.total)) + "</strong>";
   }
   function setKind(k, touched) {
     state.form.kind = k;
@@ -822,7 +859,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function renderConvert() {
     const n = parseAmt($("f-amount").value), rate = currentRate(), el = $("f-convert");
     const r = "¥" + rate.toFixed(2) + " = $1";
-    if (isIntl()) { el.textContent = ""; updateShopWarn(); return; }
+    updateTaxTip();
+    if (isIntl()) { el.textContent = taxTipOn() ? "Bill before tax" : ""; updateShopWarn(); return; }
     if (!(n > 0)) { el.textContent = (state.form.currency === "RMB" ? "Amount in yuan." : "Amount in dollars.") + " " + r; updateShopWarn(); return; }
     el.innerHTML = "= <strong>" + (state.form.currency === "RMB" ? usd(n / rate) : rmb(n * rate)) + "</strong> · " + r;
     updateShopWarn();
@@ -830,6 +868,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function resetForm() {
     state.editId = null; state.form.cat = null; state.form.kindTouched = false; state.form.fromLater = null;
     $("f-amount").value = ""; $("f-reason").value = ""; $("f-note").value = "";
+    state.form.tipSel = "none"; state.form.taxTouched = false; $("f-tax").value = ""; $("f-tip").value = "";
     $("f-date").value = todayISO();
     setKind("need", false);
     setType("expense");
@@ -984,7 +1023,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // live warning in the add form when an entry would pass one of your limits
   function updateShopWarn() {
     const box = $("f-shop"); if (!box) return;
-    const n = parseAmt($("f-amount").value), btn = $("f-submit"), base = state.editId ? "Save changes" : "Save";
+    const n = taxTipOf().total, btn = $("f-submit"), base = state.editId ? "Save changes" : "Save";
     const lims = (state.config.limits || []).filter((l) => state.form.cat && l.cats.includes(state.form.cat));
     if (!lims.length || state.form.type === "income" || !(n > 0)) { box.hidden = true; btn.textContent = base; return; }
     const date = $("f-date").value || todayISO(), amt = mainOf(n, state.form.currency, currentRate());
@@ -1008,7 +1047,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     } else { box.hidden = true; btn.textContent = base; }
   }
   async function waitForNextMonth() {
-    const n = parseAmt($("f-amount").value);
+    const n = taxTipOf().total;
     if (!(round2(n) > 0)) { $("f-msg").textContent = "Enter the amount first."; return; }
     const next = shiftMonth(curMonth(), 1), before = (state.config.later || []).slice();
     const item = { id: "l" + uid(), reason: $("f-reason").value.trim(), amount: round2(n), currency: state.form.currency, cat: state.form.cat, method: state.form.method, addedAt: Date.now(), forMonth: next };
@@ -1023,7 +1062,13 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("smart").hidden = true;
     setType(isInc(e) ? "income" : "expense");
     setCurrency(e.currency === "USD" ? "USD" : "RMB");
-    $("f-amount").value = formAmount(e);
+    // a meal opens as its parts: the bill in the box, then tax and tip
+    const meal = isIntl() && !isInc(e) && hasTaxTip(e.cat) ? mealParts(e) : null;
+    if (meal) {
+      state.form.taxTouched = true; $("f-tax").value = meal.tax || "";
+      if (meal.tip > 0) { state.form.tipSel = "custom"; $("f-tip").value = meal.tip; }
+    }
+    $("f-amount").value = meal && (meal.tax || meal.tip) ? meal.bill : formAmount(e);
     $("f-date").value = e.date;
     $("f-reason").value = e.reason || "";
     $("f-note").value = e.note || "";
@@ -1068,9 +1113,11 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   async function submitForm(ev) {
     ev.preventDefault();
     const msg = $("f-msg");
-    const amount = parseAmt($("f-amount").value);
+    const tt = taxTipOf();
+    const amount = tt.on ? tt.total : parseAmt($("f-amount").value);
     const income = state.form.type === "income";
     if (!(round2(amount) > 0)) { msg.textContent = income ? "Enter how much you received." : "Enter how much you spent."; shakeAmount(); $("f-amount").focus(); return; }
+    if (tt.bad) { msg.textContent = "Check the tax and tip. Use numbers, like 3.55."; return; }
     if (!state.form.cat) { msg.textContent = income ? "Pick where the money came from." : "Pick what it was for."; return; }
     const date = $("f-date").value || todayISO();
     if (!saneDate(date)) { $("more").open = true; msg.textContent = "Check the date. The year looks wrong."; return; }
@@ -1082,6 +1129,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const e = buildEntry({
       date, amount, currency: cur, rate, cat: state.form.cat, kind: state.form.kind, income,
       reason: $("f-reason").value.trim(), method: state.form.method, note: $("f-note").value.trim(),
+      tax: tt.tax, tip: tt.tip,
       createdAt: existing && existing.createdAt ? existing.createdAt : Date.now(),
       bill: !!(existing && existing.bill), billId: existing && existing.billId, rateGuess: isRateGuess(existing)
     });
@@ -1115,13 +1163,19 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   // ---------- Home ----------
   // the hour you added it, shown in the Day report (only when it was added on the same day it is dated)
   const entryTime = (e) => { if (!e.createdAt) return ""; const t = new Date(e.createdAt); return isoOf(t) === e.date ? t.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" }) : ""; };
+  // "incl. $3.55 tax · $8 tip" under a meal that has them (International only)
+  function inclHTML(e) {
+    if (!isIntl() || isInc(e)) return "";
+    const parts = [Number(e.tax) > 0 ? usd0(e.tax) + " tax" : "", Number(e.tip) > 0 ? usd0(e.tip) + " tip" : ""].filter(Boolean);
+    return parts.length ? '<div class="incl">incl. ' + esc(parts.join(" · ")) + "</div>" : "";
+  }
   function entryHTML(e, withTime) {
     const c = catById(e.cat), isR = e.currency !== "USD", reason = (e.reason || "").trim(), grouped = withTime === true || withTime === "week";
     // Week report: weekday and date, then the time; Day report: just the time
     const tm = withTime === "week" ? new Date(e.date + "T12:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" }) + (entryTime(e) ? " · " + entryTime(e) : "") : withTime === true ? entryTime(e) : "";
     return '<button type="button" class="entry' + (e.id === state.justAdded ? " fresh" : "") + '" data-id="' + esc(e.id) + '" aria-label="Edit this expense">' + tile(c) +
       '<span style="min-width:0"><div class="reason' + (reason ? "" : " empty") + '">' + esc(reason || "No reason written") + "</div>" +
-      '<div class="meta">' + (tm ? '<span class="tm">' + tm + "</span><span>·</span>" : grouped ? "" : "<span>" + esc(c.name) + "</span><span>·</span>") + "<span>" + esc(e.bill ? "Monthly bill" : e.method || "") + "</span>" + (e._pending ? '<span class="pend" title="Saved on this device, waiting to sync">⏳ waiting to sync</span>' : "") + "</div></span>" +
+      '<div class="meta">' + (tm ? '<span class="tm">' + tm + "</span><span>·</span>" : grouped ? "" : "<span>" + esc(c.name) + "</span><span>·</span>") + "<span>" + esc(e.bill ? "Monthly bill" : e.method || "") + "</span>" + (e._pending ? '<span class="pend" title="Saved on this device, waiting to sync">⏳ waiting to sync</span>' : "") + "</div>" + inclHTML(e) + "</span>" +
       '<span class="amt"><div class="main' + (isInc(e) ? ' inc-amt">+' : isSave(e) ? '">' : ' out-amt">−') + rmbS(isIntl() || !isR ? R(e) : e.amount) + '</div><div class="alt">' + (isInc(e) ? "+" : "") + (isR ? usd(U(e)) : usdS(e.amount)) + "</div></span></button>";
   }
   const bindEntries = (root) => root.querySelectorAll(".entry[data-id]").forEach((b) => (b.onclick = () => startEdit(b.dataset.id)));
@@ -1808,6 +1862,17 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     cards.forEach((c) => { if (!playedCards.has(c.dataset.pk)) reportObserver.observe(c); });
   }
   const heroCount = (el) => { const t = el.querySelector(".report-hero .total[data-v]"); if (t) countUp(t, "rep-" + state.reportMode, Number(t.dataset.v), rmb0); };
+  // International only: the Tax this month block (the sums come from taxMonth in src/lib/tip.js)
+  function taxHTML(key) {
+    if (!isIntl()) return "";
+    const t = taxMonth(state.expenses, key);
+    const row = (label, v) => '<li><span>' + esc(label) + '</span><b>' + esc(usd0(v)) + "</b></li>";
+    if (!(t.total > 0) && !(t.tips > 0)) return '<div class="card tax-report" id="r-tax"><div class="head"><h2>Tax this month</h2></div><p class="hint" style="margin:0">No tax this month</p></div>';
+    return '<div class="card stack tax-report" id="r-tax"><div class="head"><h2>Tax this month</h2></div>' +
+      '<div class="tax-total out-amt">' + esc(usd0(t.total)) + "</div>" +
+      (t.total > 0 ? '<ul class="tax-rows">' + t.byReason.map((r) => row(r.reason, r.amount)).join("") + (t.meals > 0 ? row("Sales tax at cafes & restaurants", t.meals) : "") + "</ul>" : "") +
+      (t.tips > 0 ? '<ul class="tax-rows tips"><li><span>Tips this month</span><b>' + esc(usd0(t.tips)) + "</b></li></ul>" : "") + "</div>";
+  }
   function renderReport() {
     const key = state.month, s = statsFor(key), prev = statsFor(shiftMonth(key, -1));
     const el = $("v-report");
@@ -1864,7 +1929,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         '<div><div class="lbl"><span class="dot k-' + k + '"></span>' + l + '</div><div class="val">' + Math.round(kp(kb[k])) + '%</div><div class="tgt">' + rmb0(kb[k]) + (inc > 0 ? " · goal " + t : "") + "</div></div>").join("") + "</div></div>";
     const big = s.list.slice().sort((a, b) => R(b) - R(a)).slice(0, 3);
     html += '<div class="card"><div class="head"><h2>Biggest 3</h2></div><div class="entries" style="margin-top:6px">' + big.map(entryHTML).join("") + "</div></div></div></div>";
-    html += patternsHTML(key, s);
+    html += taxHTML(key) + patternsHTML(key, s);
     el.innerHTML = toggle + html;
     bindEntries(el);
     bindMode(el);
@@ -2397,6 +2462,9 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function renderSettings() {
     mountModeSettings();
     $("s-food").value = state.config.foodLimit || 0;
+    $("tax-card").hidden = !isIntl();
+    $("s-tax").value = state.config.salesTaxPct || "";
+    $("s-tax").oninput = () => { state.settingsDirty = true; };
     const lc = (state.config.limits || []).length;
     $("s-lim-hint").textContent = lc ? lc + (lc === 1 ? " limit: " : " limits: ") + state.config.limits.map((l) => limName(l) + " " + rmb0(l.amount) + " a " + limWord(l)).join(", ") + ". Add, change or delete them on the Limits screen." : "Set limits for any section, per week or per month, on the Limits screen.";
     $("s-go-limits").onclick = () => setView("limits");
@@ -2466,6 +2534,8 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   function settingsProblem() {
     const rate = parseRate($("s-rate").value);
     if (!(rate >= 0.0001 && rate < 100)) return "Enter the rate as yuan per dollar, for example 6.70.";
+    const taxText = $("s-tax").value.trim();
+    if (isIntl() && taxText && !(parseAmt(taxText) >= 0 && parseAmt(taxText) <= 30)) return "Check the sales tax. Use a number from 0 to 30, like 8.875.";
     const foodText = $("s-food").value.trim();
     if (foodText && !(parseAmt(foodText) >= 0)) return "Check the daily food limit. Use a number, or 0 to turn it off.";
     const badBudget = (draftCats || []).find((c, i) => { const el = $("sc-bud-" + i), t = el ? el.value.trim() : ""; return t && !(parseAmt(t) >= 0); });
@@ -2475,7 +2545,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const problem = settingsProblem();
     if (problem) { $("s-msg").textContent = problem; return; }
     if (!state.configLoaded) { $("s-msg").textContent = "Your settings are still loading. Try again in a moment."; return; }
-    const cfg = { ...settingsToSave(state.config, settingsDrawn, readSettingsForm(), Date.now()), foodCats: state.config.foodCats.slice(), bills: state.config.bills.map((b) => ({ ...b })) };
+    const cfg = { ...settingsToSave(state.config, settingsDrawn, readSettingsForm(), Date.now()), ...(isIntl() ? { salesTaxPct: $("s-tax").value.trim() ? parseAmt($("s-tax").value) : 0 } : {}), foodCats: state.config.foodCats.slice(), bills: state.config.bills.map((b) => ({ ...b })) };
     $("s-save").disabled = true;
     try { await store.saveConfig(cfg); state.settingsDirty = false; toast("Settings saved"); renderAll("force"); }
     catch (e) { $("s-msg").textContent = "Could not save settings. Try again."; }
@@ -2655,6 +2725,12 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     $("f-kind").querySelectorAll("button").forEach((b) => (b.onclick = () => setKind(b.dataset.kind, true)));
     $("f-type").querySelectorAll("button").forEach((b) => (b.onclick = () => { if (state.form.type !== b.dataset.type) setType(b.dataset.type); }));
     $("f-amount").addEventListener("input", () => { renderConvert(); $("f-msg").textContent = ""; });
+    $("f-tax").addEventListener("input", () => { state.form.taxTouched = true; $("f-msg").textContent = ""; updateTaxTip(); updateShopWarn(); });
+    $("f-tip").addEventListener("input", () => { $("f-msg").textContent = ""; updateTaxTip(); updateShopWarn(); });
+    $("f-tip-chips").querySelectorAll("[data-tip]").forEach((b) => (b.onclick = () => {
+      state.form.tipSel = b.dataset.tip; updateTaxTip(); updateShopWarn();
+      if (b.dataset.tip === "custom") $("f-tip").focus({ preventScroll: true });
+    }));
     $("f-date").addEventListener("input", () => { updateMoreSummary(); updateShopWarn(); });
     $("f-note").addEventListener("input", updateMoreSummary);
     $("add-form").addEventListener("submit", submitForm);

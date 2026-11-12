@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { normalizeConfig, isBlankAccount, intlStart, DEFAULT_FOOD_LIMIT, DEFAULT_RATE } from "../src/lib/config.js";
+import { normalizeConfig, isBlankAccount, intlStart, withTaxSections, TAX_SECTION, TAX_REFUND_SECTION, DEFAULT_FOOD_LIMIT, DEFAULT_RATE } from "../src/lib/config.js";
 import { createOutbox, pendingCount, OUTBOX_KEY } from "../src/lib/outbox.js";
 
 describe("normalizeConfig", () => {
@@ -58,8 +58,36 @@ describe("first-time question rules", () => {
     expect(isBlankAccount(blank, { transfers: [{}] })).toBe(false);
   });
   it("International starts with no wallets and a dollar-sized food limit, but keeps one the owner set", () => {
-    expect(intlStart({ foodLimit: DEFAULT_FOOD_LIMIT })).toEqual({ wallets: [], foodLimit: 20 });
-    expect(intlStart({ foodLimit: 35 })).toEqual({ wallets: [], foodLimit: 35 });
+    const a = intlStart({ foodLimit: DEFAULT_FOOD_LIMIT });
+    expect(a.wallets).toEqual([]);
+    expect(a.foodLimit).toBe(20);
+    expect(intlStart({ foodLimit: 35 }).foodLimit).toBe(35);
+  });
+  it("International start includes the tax sections", () => {
+    const a = intlStart(normalizeConfig(null));
+    expect(a.categories.some((c) => c.id === "taxes")).toBe(true);
+    expect(a.incomeCats.some((c) => c.id === "tax_refund")).toBe(true);
+  });
+  it("salesTaxPct: default 0, decimals kept, clamped to 0-30", () => {
+    expect(normalizeConfig({}).salesTaxPct).toBe(0);
+    expect(normalizeConfig({ salesTaxPct: 8.875 }).salesTaxPct).toBe(8.875);
+    expect(normalizeConfig({ salesTaxPct: -1 }).salesTaxPct).toBe(0);
+    expect(normalizeConfig({ salesTaxPct: 50 }).salesTaxPct).toBe(30);
+  });
+  it("withTaxSections adds once, in order, never duplicates", () => {
+    const c = normalizeConfig(null);
+    const w = withTaxSections(c);
+    const ids = w.categories.map((x) => x.id);
+    expect(ids[ids.indexOf("taxes") + 1]).toBe("other");
+    expect(w.categories.filter((x) => x.id === "taxes")).toHaveLength(1);
+    expect(w.categories).toContainEqual(TAX_SECTION);
+    const ii = w.incomeCats.map((x) => x.id);
+    expect(ii[ii.indexOf("tax_refund") + 1]).toBe("income_other");
+    expect(w.incomeCats.some((x) => x.id === "tax_refund")).toBe(true);
+    expect(TAX_REFUND_SECTION.id).toBe("tax_refund");
+    const again = withTaxSections({ categories: w.categories, incomeCats: w.incomeCats });
+    expect(again.categories).toHaveLength(w.categories.length);
+    expect(again.incomeCats).toHaveLength(w.incomeCats.length);
   });
 });
 
