@@ -1,6 +1,6 @@
 // "Install app" card in Settings, Android only. Chrome on Android fires beforeinstallprompt when the app can be installed.
 // Chrome and Edge on Windows fire it too, so everything here is skipped unless the device is Android.
-import { isAndroid } from "./lib/lock.js";
+import { isAndroid } from "./lib/os.js";
 const android = isAndroid(navigator);
 let saved = null;
 const card = () => document.getElementById("install-card");

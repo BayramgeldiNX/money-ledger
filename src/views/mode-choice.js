@@ -1,8 +1,7 @@
+import { esc, reduced } from "../util.js";
 // First-time "Which money do you use?" screen, and the Settings card to switch mode later.
 // Plain DOM, no framework. All text goes through esc() before it is put in markup.
 
-const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const reduced = () => !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches);
 
 const LOGO = '<span class="logo" aria-hidden="true"><svg viewBox="0 0 1024 1024"><g fill="none" stroke="#fff" stroke-width="76" stroke-linecap="round" stroke-linejoin="round"><path d="M352 300 512 515 672 300M512 515v255M392 570h240M392 680h240"/></g><circle cx="780" cy="250" r="56" fill="#46C77F"/></svg></span>';
 

@@ -1,8 +1,9 @@
+import { isIOS, isAndroid } from "./lib/os.js";
 // Face ID lock for the iPhone app. It uses a passkey only as a way to ask iOS for Face ID, so it is a
 // lock screen on this device: it does not encrypt anything, and the data stays protected by the sign-in.
 // A 4-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
 // passcode, which is why turning the lock on needs a signed-in account.
-import { isIOS, isAndroid, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
+import { shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
 import { syncBack } from "./backnav.js";
 import { reduced, sleep } from "./motion.js";

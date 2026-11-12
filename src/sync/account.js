@@ -1,8 +1,10 @@
 // The Account card in Settings: sign in, create an account, sign out. The page reloads after a change
 // so the whole app starts again on the right storage (this device, or your account).
 import { syncAvailable, currentUser, signIn, signUp, signOutNow, authMessage } from "./firebase.js";
+import { esc } from "../util.js";
+import { pendingCount } from "../lib/outbox.js";
+import { browserStorage } from "../store.js";
 
-const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 
 export async function mountAccount(el) {
   if (!el) return;
@@ -20,7 +22,7 @@ export async function mountAccount(el) {
     el.querySelector("#acct-out").onclick = async () => {
       const b = el.querySelector("#acct-out");
       // changes still waiting to be sent would be stranded on this device
-      let waiting = 0; try { waiting = JSON.parse(localStorage.getItem("ml.outbox") || "[]").length; } catch (e) {}
+      let waiting = 0; try { waiting = pendingCount(browserStorage()); } catch (e) {}
       if (waiting && !b.dataset.armed) { b.dataset.armed = "1"; b.textContent = "Sign out anyway"; el.querySelector("#acct-msg").textContent = waiting + (waiting === 1 ? " change has" : " changes have") + " not been sent to your account yet. Go online and wait for it to finish, or tap again to sign out anyway."; return; }
       b.disabled = true;
       try { await signOutNow(); location.reload(); } catch (e) { b.disabled = false; el.querySelector("#acct-msg").textContent = "Could not sign out. Try again."; }

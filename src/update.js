@@ -1,3 +1,4 @@
+import { sleep } from "./util.js";
 // Settings > App version: shows the build and lets the owner pull a newer version by hand.
 // vite-plugin-pwa runs in autoUpdate mode, so a found update installs and the page reloads by itself.
 import { registerSW } from "virtual:pwa-register";
@@ -5,13 +6,12 @@ import { registerSW } from "virtual:pwa-register";
 let reg = null;
 registerSW({ immediate: true, onRegisteredSW: (_url, r) => { reg = r || null; } });
 
-const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Resolves to "updating" (page reloads on its own), "current", or "unavailable".
 export async function checkForUpdate() {
   if (!reg) return "unavailable";
   try { await reg.update(); } catch { return "unavailable"; }
-  for (let i = 0; i < 3 && !(reg.installing || reg.waiting); i++) await wait(300);
+  for (let i = 0; i < 3 && !(reg.installing || reg.waiting); i++) await sleep(300);
   return reg.installing || reg.waiting ? "updating" : "current";
 }
 
