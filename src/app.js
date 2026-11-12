@@ -8,10 +8,11 @@ import { isLockShowing } from "./lock.js";
 import { applyModeIcon, rememberedMode } from "./mode-icon.js";
 import { askMode, mountModeCard } from "./views/mode-choice.js";
 import { pad, isoOf, shiftMonth, daysIn, mondayOf, addDays, saneDate } from "./lib/dates.js";
-import { setMode, isIntl, modeFor, curDefault, mainOf, formAmount, methods as modeMethods, defaultMethod as modeDefaultMethod, typedText as modeTypedText } from "./lib/mode.js";
-import { buildEntry, billEntry, isRateGuess as rateGuessOf, ratesToFix, balanceTime as balanceTimeOf, paidOf, leftOf, applyPayment, buildDebt } from "./lib/records.js";
+import { setMode, isIntl, modeFor, curDefault, mainOf, formAmount, repeatOf, laterAmount, methods as modeMethods, defaultMethod as modeDefaultMethod, typedText as modeTypedText } from "./lib/mode.js";
+import { buildEntry, billEntry, isRateGuess as rateGuessOf, ratesToFix, balanceTime as balanceTimeOf, paidOf, leftOf, applyPayment, buildDebt, convertAmount, transferProblem, buildTransfer } from "./lib/records.js";
 import { limEntries as limEntriesOf, limSpent as limSpentOf, limStatus, anyOver, laterDue, entryWarning, foodOn as foodOnOf, foodKept } from "./lib/limits.js";
 import { firstEntryDate, daysSoFar, pctChange, isSamePct, monthPace, weekStats as weekStatsOf } from "./lib/report.js";
+import { buildBackup, newEntryCount, planRestore, applyRestorePlan } from "./lib/backup.js";
 import { openStore, browserStorage } from "./store.js";
 import { KIND_LABEL, normalizeConfig, intlStart, isBlankAccount } from "./lib/config.js";
 import { uid } from "./lib/ids.js";
@@ -570,7 +571,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     box.querySelectorAll(".fav").forEach((b) => (b.onclick = () => quickAdd(favs[Number(b.dataset.i)], b)));
   }
   async function quickAdd(src, btn) {
-    const rate = state.config.rate, cur = isIntl() || src.currency === "USD" ? "USD" : "RMB", amount = isIntl() ? round2(R(src)) : Number(src.amount);
+    const rate = state.config.rate, { currency: cur, amount } = repeatOf(src);
     const e = buildEntry({ date: todayISO(), amount, currency: cur, rate, cat: src.cat, kind: src.kind || catById(src.cat).kind, reason: src.reason,
       method: src.method && (!isIntl() || allMethods().includes(src.method)) ? src.method : state.form.method, createdAt: Date.now(), rateGuess: isRateGuess() });
     if (btn) btn.disabled = true;
@@ -969,7 +970,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     resetForm();
     state.form.fromLater = id;
     setCurrency(x.currency);
-    $("f-amount").value = isIntl() ? round2(mainOf(x.amount, x.currency, state.config.rate)) : x.amount; $("f-reason").value = x.reason;
+    $("f-amount").value = laterAmount(x, state.config.rate); $("f-reason").value = x.reason;
     if (state.config.categories.some((c) => c.id === x.cat)) pickCat(x.cat);
     state.form.method = allMethods().includes(x.method) ? x.method : defaultMethod();
     $("smart").hidden = true;
@@ -1887,7 +1888,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
   const wTile = (w) => '<span class="tile" style="--c:' + esc(w.color) + '">' + icon(w.icon) + "</span>";
   // Wallets keep their own currency. A $ wallet counts in dollars; totals convert it to yuan at your rate.
   const wMoney = (w, n) => (wCur(w) === "USD" ? usd0(n) : yuan0(n));
-  const convert = (n, fromCur, toCur) => (fromCur === toCur ? n : fromCur === "USD" ? n * state.config.rate : n / state.config.rate);
+  const convert = (n, fromCur, toCur) => convertAmount(n, fromCur, toCur, state.config.rate);
   const walletOf = (method) => (state.config.wallets || []).find((w) => w.methods.includes(method));
   // A balance "on" a past day means it was true at the start of that day, so entries dated that day count.
   const balanceTime = (iso) => balanceTimeOf(iso, todayISO(), Date.now());
@@ -2025,12 +2026,12 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const fm = d.querySelector('[data-wsave="move"]');
       if (fm) fm.onclick = async () => {
         const f = d.querySelector('[data-wform="move"]'), to = f.querySelector("select").value, amt = parseAmt(f.querySelector("[data-mamt]").value);
-        if (!(round2(amt) > 0)) { toast("Enter how much you moved.", true); return; }
         const dest = ws.find((x) => x.id === to);
         const cross = dest && wCur(dest) !== wCur(w);
         const got = cross ? parseAmt(f.querySelector("[data-mgot]").value) : amt;
-        if (cross && !(round2(got) > 0)) { toast("Enter how much you received.", true); return; }
-        const id = "t" + uid(), tr = { from: w.id, to, amount: round2(amt), amountTo: round2(got), date: todayISO(), createdAt: Date.now() };
+        const problem = transferProblem(amt, got, cross);
+        if (problem) { toast(problem, true); return; }
+        const id = "t" + uid(), tr = buildTransfer({ from: w.id, to, amount: amt, amountTo: got, today: todayISO(), now: Date.now() });
         try {
           await store.transferSet(id, tr);
           // the amount travels from one wallet to the other (changing to the other currency on the way)
@@ -2070,8 +2071,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     let dl = null;
     try { dl = window.claude && window.claude.use ? await window.claude.use("downloads") : null; } catch (e) { dl = null; }
     if (!dl) { msg.textContent = "Could not start the download."; return; }
-    const data = { app: "money-ledger", version: 1, exportedAt: new Date().toISOString(), config: state.config,
-      expenses: state.expenses.map((e) => ({ ...e })), debts: state.debts.map((d) => ({ ...d })), transfers: state.transfers.map((t) => ({ ...t })) };
+    const data = buildBackup(state);
     try {
       await dl.save({ filename: "money-ledger-backup-" + todayISO() + ".json", data: JSON.stringify(data, null, 1) });
       try { await store.saveConfig({ ...state.config, lastBackupAt: Date.now() }); state.config.lastBackupAt = Date.now(); } catch (e) {}
@@ -2089,8 +2089,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       if (problem) { msg.textContent = problem; panel.hidden = true; return; }
       msg.textContent = "";
       data.expenses = cleanExpenses(data.expenses); data.debts = cleanDebts(data.debts); data.transfers = cleanTransfers(data.transfers);
-      const ids = new Set(state.expenses.map((e) => e.id));
-      const newCount = data.expenses.filter((e) => e && e.id && !ids.has(e.id)).length;
+      const newCount = newEntryCount(state.expenses, data.expenses);
       panel.hidden = false;
       panel.innerHTML = '<div class="bk-box"><div><b>Backup from ' + esc(data.exportedAt ? new Date(data.exportedAt).toLocaleString("en-US", { dateStyle: "medium", timeStyle: "short" }) : "unknown date") + "</b></div>" +
         "<div>" + nOf(data.expenses.length, "entry", "entries") + " · " + nOf(data.debts.length, "debt", "debts") + " · " + nOf(data.transfers.length, "wallet move", "wallet moves") + "</div>" +
@@ -2111,31 +2110,16 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const prog = $("bk-prog"), btns = $("bk-panel").querySelectorAll("button");
     if (!state.configLoaded) { prog.textContent = "Your settings are still loading. Try again in a moment."; return; }
     btns.forEach((b) => (b.disabled = true));
-    const strip = (o) => Object.fromEntries(Object.entries(o).filter(([k]) => k !== "id" && k !== "_pending"));
-    let done = 0;
+    const progress = { done: 0 };
+    let result;
     try {
-      const have = new Set(replace ? [] : state.expenses.map((e) => e.id)), haveD = new Set(replace ? [] : state.debts.map((d) => d.id)), haveT = new Set(replace ? [] : state.transfers.map((t) => t.id));
-      const exps = data.expenses.filter((e) => !have.has(String(e.id)));
-      for (const e of exps) { await store.addWithId(String(e.id), strip(e)); if (++done % 10 === 0) prog.textContent = "Restoring entries… " + done + " of " + exps.length; }
-      for (const d of data.debts.filter((x) => !haveD.has(String(x.id)))) await store.debtSet(String(d.id), strip(d));
-      for (const t of data.transfers.filter((x) => !haveT.has(String(x.id)))) await store.transferSet(String(t.id), strip(t));
-      // Replace removes the old data only after the backup is safely in, so a problem half way can never leave you with less than you had
-      if (replace) {
-        const inFile = (list) => new Set(list.map((x) => String(x.id)));
-        const keepE = inFile(data.expenses), keepD = inFile(data.debts), keepT = inFile(data.transfers);
-        for (const e of state.expenses.filter((x) => !keepE.has(x.id))) await store.remove(e.id);
-        for (const d of state.debts.filter((x) => !keepD.has(x.id))) await store.debtDelete(d.id);
-        for (const t of state.transfers.filter((x) => !keepT.has(x.id))) await store.transferDelete(t.id);
-      }
-      if (data.config && (replace || !state.config.wallets)) {
-        const cfg = replace ? data.config : { ...state.config, wallets: data.config.wallets || state.config.wallets };
-        await store.saveConfig(cfg);
-      }
+      // adds first, removals only after (Replace), so a problem half way never leaves less than there was
+      result = await applyRestorePlan(planRestore(state, data, { replace }), store, progress, (n, total) => { prog.textContent = "Restoring entries… " + n + " of " + total; });
       $("bk-panel").hidden = true;
-      toast(replace ? "Backup restored" : "Added " + nOf(exps.length, "entry", "entries") + " from the backup");
+      toast(replace ? "Backup restored" : "Added " + nOf(result.entries, "entry", "entries") + " from the backup");
       renderAll("force");
     } catch (e) {
-      prog.textContent = "Stopped after " + done + " items: " + (e && e.code === "quota_exceeded" ? "storage is full." : "connection problem. Try again; items already restored are kept.");
+      prog.textContent = "Stopped after " + progress.done + " items: " + (e && e.code === "quota_exceeded" ? "storage is full." : "connection problem. Try again; items already restored are kept.");
       btns.forEach((b) => (b.disabled = false));
     }
   }
@@ -2701,7 +2685,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       const e = state.expenses.find((x) => x.id === state.editId);
       if (!e) return;
       const day = Number(e.date.slice(8, 10)), key = curMonth();
-      const b = { id: "b" + uid(), type: isInc(e) ? "income" : "expense", name: (e.reason || "").trim() || catById(e.cat).name, cat: e.cat, amount: isIntl() ? round2(R(e)) : Number(e.amount), currency: isIntl() || e.currency === "USD" ? "USD" : "RMB", day, method: e.method || defaultMethod() };
+      const b = { id: "b" + uid(), type: isInc(e) ? "income" : "expense", name: (e.reason || "").trim() || catById(e.cat).name, cat: e.cat, ...repeatOf(e), day, method: e.method || defaultMethod() };
       if (e.date.slice(0, 7) === key) { const rid = "bill-" + b.id + "-" + key; billsDone.add(rid); try { await store.markBillRun(rid); } catch (err) {} }
       if (await saveBills(state.config.bills.concat([b]), "Repeats on the " + ordinal(day) + " of every month")) closeSheet();
     };

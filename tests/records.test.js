@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { amountsOf, buildEntry, billEntry, isRateGuess, ratesToFix, balanceTime, leftOf, paidOf, isSettled, applyPayment, walletAtFor, buildDebt } from "../src/lib/records.js";
+import { convertAmount, transferProblem, buildTransfer, amountsOf, buildEntry, billEntry, isRateGuess, ratesToFix, balanceTime, leftOf, paidOf, isSettled, applyPayment, walletAtFor, buildDebt } from "../src/lib/records.js";
 import { walletBalance } from "../src/lib/ledger.js";
 
 const RATE = 6.7;
@@ -118,5 +118,33 @@ describe("debts", () => {
     const old = { id: "x", rate: 6.5, createdAt: 11, payments: [{ amount: 80.5 }], example: true, rateGuess: true };
     const edited = buildDebt(form, { old, rate: 7, configLoaded: true, now: 99 });
     expect(edited).toMatchObject({ rate: 6.5, createdAt: 11, example: true, rateGuess: true, settled: true, settledAt: 99 });
+  });
+});
+
+describe("moving money between wallets", () => {
+  it("converts at the rate in either direction, and leaves the same currency alone", () => {
+    expect(convertAmount(670, "RMB", "USD", 6.7)).toBeCloseTo(100);
+    expect(convertAmount(100, "USD", "RMB", 6.7)).toBeCloseTo(670);
+    expect(convertAmount(5, "RMB", "RMB", 6.7)).toBe(5);
+  });
+  it("says what is wrong before saving", () => {
+    expect(transferProblem(0, 0, false)).toBe("Enter how much you moved.");
+    expect(transferProblem(NaN, 5, true)).toBe("Enter how much you moved.");
+    expect(transferProblem(10, 0, true)).toBe("Enter how much you received.");
+    expect(transferProblem(10, NaN, false)).toBe(""); // same currency: nothing to receive
+    expect(transferProblem(10.5, 70, true)).toBe("");
+  });
+  it("keeps the amount really received, so a ¥ to $ move is not re-converted", () => {
+    const tr = buildTransfer({ from: "rmb", to: "usd", amount: 670, amountTo: 98.75, today: "2026-06-15", now: 5 });
+    expect(tr).toEqual({ from: "rmb", to: "usd", amount: 670, amountTo: 98.75, date: "2026-06-15", createdAt: 5 });
+    const setAt = new Date(2026, 5, 1).getTime();
+    const rmb = { id: "rmb", name: "Alipay", methods: ["Alipay"], currency: "RMB", balance: 1000, setAt };
+    const usdW = { id: "usd", name: "Chase", methods: ["Chase"], currency: "USD", balance: 0, setAt };
+    const ctx = { expenses: [], debts: [], transfers: [{ id: "t", ...tr, createdAt: new Date(2026, 5, 15, 12).getTime() }], wallets: [rmb, usdW] };
+    expect(walletBalance(rmb, ctx)).toBe(330);
+    expect(walletBalance(usdW, ctx)).toBe(98.75); // the dollars it really got, not 100
+  });
+  it("rounds to cents", () => {
+    expect(buildTransfer({ from: "a", to: "b", amount: 10.005, amountTo: 1.4949, today: "d", now: 1 })).toMatchObject({ amount: 10.01, amountTo: 1.49 });
   });
 });

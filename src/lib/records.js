@@ -76,3 +76,11 @@ export function buildDebt({ dir, person, amount, currency, reason, start, due, w
   if (isSettled(doc.amount, doc.payments)) { doc.settled = true; doc.settledAt = now; }
   return doc;
 }
+
+// ---- moving money between wallets ----
+// an amount in one currency as the other, at the rate (what the other wallet is filled in with; the owner can change it)
+export const convertAmount = (n, fromCur, toCur, rate) => (fromCur === toCur ? n : fromCur === "USD" ? n * rate : n / rate);
+// what is wrong with a move the owner typed ("" when fine). `got` is only needed between a yuan and a dollar wallet.
+export const transferProblem = (amount, got, cross) => (!(round2(amount) > 0) ? "Enter how much you moved." : cross && !(round2(got) > 0) ? "Enter how much you received." : "");
+// A wallet move. `amountTo` is what the other wallet really received, so a move between ¥ and $ wallets keeps the real figure.
+export const buildTransfer = ({ from, to, amount, amountTo, today, now }) => ({ from, to, amount: round2(amount), amountTo: round2(amountTo), date: today, createdAt: now });

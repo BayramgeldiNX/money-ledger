@@ -44,3 +44,10 @@ export const curDefault = () => curDefaultFor(current);
 export const mainOf = (n, cur, rate) => mainOfFor(current, n, cur, rate);
 export const typedText = (amount, cur, rate) => typedTextFor(current, amount, cur, rate);
 export const formAmount = (e) => formAmountFor(current, e);
+
+// The currency and amount to repeat an existing entry with (quick add, "repeat monthly"): International repeats in dollars.
+export const repeatOfFor = (mode, e) => ({ currency: mode === "intl" || e.currency === "USD" ? "USD" : "RMB", amount: mode === "intl" ? round2(Number(e.usd) || 0) : Number(e.amount) });
+// what goes in the amount box for an item from the waiting list
+export const laterAmountFor = (mode, x, rate) => (mode === "intl" ? round2(mainOfFor(mode, x.amount, x.currency, rate)) : x.amount);
+export const repeatOf = (e) => repeatOfFor(current, e);
+export const laterAmount = (x, rate) => laterAmountFor(current, x, rate);

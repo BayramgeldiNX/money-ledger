@@ -87,3 +87,21 @@ describe("amounts", () => {
     expect(asCn).toEqual([67, 10, 67]);
   });
 });
+
+import { repeatOfFor, laterAmountFor } from "../src/lib/mode.js";
+describe("repeating an entry", () => {
+  const yuan = { amount: 67, currency: "RMB", usd: 10, rmb: 67 }, usdE = { amount: 12.8, currency: "USD", usd: 12.8, rmb: 85.76 };
+  it("Chinese repeats in the entry's own currency and amount", () => {
+    expect(repeatOfFor("cn", yuan)).toEqual({ currency: "RMB", amount: 67 });
+    expect(repeatOfFor("cn", usdE)).toEqual({ currency: "USD", amount: 12.8 });
+  });
+  it("International repeats everything in dollars, from the stored dollars", () => {
+    expect(repeatOfFor("intl", yuan)).toEqual({ currency: "USD", amount: 10 });
+    expect(repeatOfFor("intl", usdE)).toEqual({ currency: "USD", amount: 12.8 });
+  });
+  it("a waiting-list item fills the box in dollars in International only", () => {
+    expect(laterAmountFor("cn", { amount: 300, currency: "RMB" }, 6.7)).toBe(300);
+    expect(laterAmountFor("intl", { amount: 67, currency: "RMB" }, 6.7)).toBe(10);
+    expect(laterAmountFor("intl", { amount: 20, currency: "USD" }, 6.7)).toBe(20);
+  });
+});

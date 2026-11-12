@@ -86,3 +86,67 @@ describe("isAndroid / osOf", () => {
     expect(osOf({ userAgent: windows, platform: "Win32" })).toBe("");
   });
 });
+
+import { attemptPasscode, leftAtToRemember, onReturn, onStart, LOCK_KEYS } from "../src/lib/lock.js";
+import { createStorage } from "../src/lib/storage.js";
+
+const memoryStorage = () => { const m = new Map(); return { storage: createStorage({ getItem: (k) => (m.has(k) ? m.get(k) : null), setItem: (k, v) => m.set(k, v) }), m }; };
+
+describe("attemptPasscode (the wrong-try counter)", () => {
+  it("a right passcode passes and clears the count", async () => {
+    const { storage } = memoryStorage();
+    storage.write(LOCK_KEYS.pass, await makePassRecord("1234", 1000));
+    storage.write(LOCK_KEYS.fails, { n: 3, at: 100 });
+    expect(await attemptPasscode("1234", storage, 200)).toBe("");
+    expect(storage.read(LOCK_KEYS.fails)).toEqual({ n: 0, at: 0 });
+  });
+  it("a wrong passcode is counted with the time", async () => {
+    const { storage } = memoryStorage();
+    storage.write(LOCK_KEYS.pass, await makePassRecord("1234", 1000));
+    expect(await attemptPasscode("0000", storage, 500)).toBe("Wrong passcode.");
+    expect(storage.read(LOCK_KEYS.fails)).toEqual({ n: 1, at: 500 });
+  });
+  it("five wrong tries, then it makes you wait, even for the right passcode", async () => {
+    const { storage } = memoryStorage();
+    storage.write(LOCK_KEYS.pass, await makePassRecord("1234", 1000));
+    for (let i = 0; i < 5; i++) await attemptPasscode("0000", storage, 1000);
+    expect(await attemptPasscode("1234", storage, 1000 + 10 * 1000)).toBe("Too many tries. Wait 20 seconds.");
+    expect(storage.read(LOCK_KEYS.fails).n).toBe(5); // waiting does not count as another wrong try
+    expect(await attemptPasscode("1234", storage, 1000 + 30 * 1000)).toBe(""); // after the wait the right one works
+  });
+  it("the count survives closing the app (it is in storage, not in memory)", async () => {
+    const { storage, m } = memoryStorage();
+    storage.write(LOCK_KEYS.pass, await makePassRecord("1234", 1000));
+    for (let i = 0; i < 5; i++) await attemptPasscode("0000", storage, 1000);
+    const reopened = createStorage({ getItem: (k) => m.get(k) ?? null, setItem: (k, v) => m.set(k, v) });
+    expect(await attemptPasscode("1234", reopened, 1001)).toMatch(/Too many tries/);
+  });
+  it("no passcode saved means nothing passes", async () => {
+    const { storage } = memoryStorage();
+    expect(await attemptPasscode("1234", storage, 1)).toBe("Wrong passcode.");
+  });
+});
+
+describe("when the lock asks again", () => {
+  const MIN = 60 * 1000;
+  it("remembers the time away for an update reload, but never while locked or with no lock", () => {
+    expect(leftAtToRemember({ locked: false, hasLock: true, hiddenAt: 500, now: 900 })).toBe(500);
+    expect(leftAtToRemember({ locked: false, hasLock: true, hiddenAt: 0, now: 900 })).toBe(900);
+    expect(leftAtToRemember({ locked: true, hasLock: true, hiddenAt: 500, now: 900 })).toBeNull();
+    expect(leftAtToRemember({ locked: false, hasLock: false, hiddenAt: 500, now: 900 })).toBeNull();
+  });
+  it("coming back: a short trip away does not ask again, a long one does", () => {
+    expect(onReturn({ away: 1000, locked: false, now: 1000 + 59 * 1000 })).toBe("open");
+    expect(onReturn({ away: 1000, locked: false, now: 1000 + MIN })).toBe("relock");
+    expect(onReturn({ away: 0, locked: false, now: 5 * MIN })).toBe("none");
+    expect(onReturn({ away: 1000, locked: true, now: 5 * MIN })).toBe("none"); // already asking
+  });
+  it("starting: asks at once with no remembered time or a long one; a quick update reload does not", () => {
+    expect(onStart({ left: 0, hidden: false, now: 10 * MIN })).toEqual({ lock: true, cover: true, hiddenAt: 0 });
+    expect(onStart({ left: 1000, hidden: false, now: 1000 + 2 * MIN })).toEqual({ lock: true, cover: true, hiddenAt: 0 });
+    expect(onStart({ left: 1000, hidden: false, now: 1000 + 10 * 1000 })).toEqual({ lock: false, cover: false, hiddenAt: 0 });
+  });
+  it("reloaded in the background: covered, and the time away still counts from when the owner left", () => {
+    expect(onStart({ left: 1000, hidden: true, now: 1000 + 10 * 1000 })).toEqual({ lock: false, cover: true, hiddenAt: 1000 });
+  });
+});
