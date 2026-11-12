@@ -12,9 +12,11 @@ export const amountsOf = (amount, currency, rate) => ({
 });
 
 // An entry. `rate` is the rate the entry keeps (an edit keeps its own). Income has kind "income" and type "income".
-export function buildEntry({ date, amount, currency, rate, cat, kind, reason, method, note = "", createdAt, income = false, bill = false, billId, rateGuess = false }) {
+export function buildEntry({ date, amount, currency, rate, cat, kind, reason, method, note = "", createdAt, income = false, bill = false, billId, rateGuess = false, tax = 0, tip = 0 }) {
   const e = { date, amount: round2(amount), currency, rate, ...amountsOf(amount, currency, rate), cat, kind: income ? "income" : kind, reason, method, note, createdAt };
   if (income) e.type = "income";
+  if (Number(tax) > 0) e.tax = round2(Number(tax));
+  if (Number(tip) > 0) e.tip = round2(Number(tip));
   if (bill) { e.bill = true; e.billId = billId; }
   if (rateGuess) e.rateGuess = true;
   return e;

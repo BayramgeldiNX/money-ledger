@@ -43,6 +43,7 @@ export function normalizeConfig(d) {
     rate: Number(c.rate) > 0 ? Number(c.rate) : DEFAULT_RATE,
     rateSetAt: Number(c.rateSetAt) > 0 ? Number(c.rateSetAt) : 0,
     income: Number(c.income) > 0 ? Number(c.income) : 0,
+    salesTaxPct: Math.min(30, Math.max(0, Number(c.salesTaxPct) || 0)),
     foodLimit: c.foodLimit == null ? DEFAULT_FOOD_LIMIT : Math.max(0, Number(c.foodLimit) || 0),
     foodCats: Array.isArray(c.foodCats) ? c.foodCats.map(String) : DEFAULT_FOOD_CATS.slice(),
     bills: Array.isArray(c.bills) ? c.bills.filter((b) => b && b.id && Number(b.amount) > 0).map((b) => ({ id: String(b.id), type: b.type === "income" ? "income" : "expense", name: String(b.name || "Monthly bill"), cat: String(b.cat || "other"), amount: Number(b.amount), currency: b.currency === "USD" ? "USD" : "RMB", day: Math.min(31, Math.max(1, Math.round(Number(b.day) || 1))), method: String(b.method || "Bank transfer") })) : [],
@@ -67,8 +68,24 @@ export function isBlankAccount(config, { expenses = [], debts = [], transfers = 
   return !config.mode && config.wallets === null && !expenses.length && !debts.length && !transfers.length;
 }
 
+export const TAX_SECTION = { id: "taxes", name: "Taxes", color: "#7A5AF8", kind: "need", budget: 0 };
+export const TAX_REFUND_SECTION = { id: "tax_refund", name: "Tax refund", color: "#0E9384" };
+
+// The lists with the Taxes and Tax refund sections added, only if missing (Taxes before "other", Tax refund before "income_other").
+export function withTaxSections(config) {
+  const add = (list, sec, before) => {
+    if (list.some((x) => x.id === sec.id)) return list;
+    const i = list.findIndex((x) => x.id === before);
+    return i < 0 ? [...list, sec] : [...list.slice(0, i), sec, ...list.slice(i)];
+  };
+  return {
+    categories: add(config.categories || DEFAULT_CATS, TAX_SECTION, "other"),
+    incomeCats: add(config.incomeCats || DEFAULT_INCOME_CATS, TAX_REFUND_SECTION, "income_other")
+  };
+}
+
 // What a new International account starts with: no wallets, and a dollar-sized food limit
 // (the yuan default of 100 would be $100 a day). A limit the owner already changed is kept.
 export function intlStart(config) {
-  return { wallets: [], foodLimit: config.foodLimit === DEFAULT_FOOD_LIMIT ? 20 : config.foodLimit };
+  return { wallets: [], foodLimit: config.foodLimit === DEFAULT_FOOD_LIMIT ? 20 : config.foodLimit, ...withTaxSections(config) };
 }

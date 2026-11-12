@@ -92,6 +92,14 @@
       <div class="card stack" id="mode-card" hidden></div>
       <div class="card stack" id="install-card" hidden></div>
       <div class="card stack" id="lock-card" hidden></div>
+      <div class="card stack" id="tax-card" hidden>
+        <div class="head"><h2>Sales tax</h2></div>
+        <div class="field">
+          <label for="s-tax">Sales tax %</label>
+          <input class="input" id="s-tax" inputmode="decimal" placeholder="0">
+        </div>
+        <p class="hint" style="margin:0">Fills the tax on cafe and restaurant meals</p>
+      </div>
       <div class="card stack">
         <div class="head"><h2>Daily food limit</h2></div>
         <div class="field">
@@ -194,6 +202,20 @@
       <input id="f-amount" inputmode="decimal" enterkeyhint="done" placeholder="0" aria-label="Amount">
     </div>
     <div class="convert" id="f-convert"></div>
+    <div class="tax-block stack" id="f-taxtip" hidden>
+      <div class="tt-row"><label for="f-tax">Tax</label><input class="input" id="f-tax" inputmode="decimal" placeholder="0" aria-label="Tax"></div>
+      <div class="tt-row"><span class="label" id="l-tip">Tip</span>
+        <div class="chips" id="f-tip-chips" role="group" aria-labelledby="l-tip">
+          <button type="button" class="chip plain" data-tip="none" aria-pressed="true">None</button>
+          <button type="button" class="chip plain" data-tip="15" aria-pressed="false">15%</button>
+          <button type="button" class="chip plain" data-tip="18" aria-pressed="false">18%</button>
+          <button type="button" class="chip plain" data-tip="20" aria-pressed="false">20%</button>
+          <button type="button" class="chip plain" data-tip="custom" aria-pressed="false">Custom</button>
+        </div>
+      </div>
+      <div class="tt-row" id="f-tip-custom" hidden><label for="f-tip">Tip amount</label><input class="input" id="f-tip" inputmode="decimal" placeholder="0" aria-label="Tip amount"></div>
+      <div class="tt-total" id="f-total" hidden></div>
+    </div>
     <div class="stack favs" id="favs" hidden></div>
     <div class="smart" id="smart">
       <div class="smart-row">
@@ -211,6 +233,7 @@
       <label for="f-reason" id="l-reason">Why</label>
       <input class="input" id="f-reason" list="reason-suggest" maxlength="120" placeholder="e.g. lunch with colleagues">
       <datalist id="reason-suggest"></datalist>
+      <div class="chips tax-reasons" id="f-tax-reasons" hidden></div>
     </div>
     <div class="field">
       <span class="label" id="l-method">Paid with</span>
