@@ -34,8 +34,12 @@ Firebase project `money-91f6a` (email/password sign-in, Firestore, rules in `fir
 ## Stack and layout
 - Vite + vite-plugin-pwa (generateSW, `autoUpdate`), base `/money-ledger/` for builds, `/` in dev. Plain JS, no framework.
 - `index.html`: the screens' markup. `src/styles.css`: all CSS (light/dark tokens, iPhone safe areas). `src/main.js` loads everything.
-- `src/app.js`: the app (state, rendering, forms, reports). Still one big file, being split into `src/views/` over time.
-- `src/lib/`: `format.js` (money text, parseAmt), `dates.js`, `ledger.js` (stats + wallet math). **Pure and tested** — put new math here.
+- `src/app.js`: the screens (rendering, forms, DOM wiring). Still one big file, being split into `src/views/` over time. Logic that is not about drawing lives in the modules below.
+- `src/lib/`: **pure and tested — put new logic here.** `format.js` (money text, parseAmt), `dates.js`, `ledger.js` (stats + wallet math), `config.js` (settings schema `normalizeConfig`, defaults, first-time-question rules),
+  `mode.js` (owns cn/intl and main money: `setMode` is the only caller of `setMainCur`; methods, default currency, how amounts are typed/shown), `records.js` (builds entries, debts, payments, wallet `setAt`/`walletAt`, rate-guess marks, one "settled" rule),
+  `limits.js` (one verdict per limit: ok/near 80%/hot 90%/over, the add-form warning, food limit days kept), `report.js` (week stats, % change, month pace/projection), `outbox.js` (offline queue), `storage.js`, `os.js`, `ids.js`.
+- `src/store.js`: the data store. `openStore({ db, state, hooks, storage })` picks the Firestore adapter (outbox, offline-first) or the localStorage adapter; both have the same interface and both run `normalizeConfig` in `saveConfig`, so callers never re-assign `state.config`. Tested with a fake db.
+- `src/util.js`: `esc`, `sleep`, `reduced` (one copy each).
 - `src/motion.js`: DOM-only motion helpers (rolling digits, sliding highlight, swipe rows, skeletons, empty-state art, money flying between wallets, theme fade). Pure part `rollParts` is tested. All motion is skipped under `prefers-reduced-motion`; its CSS is the "Motion" section at the end of `styles.css` (tokens `--ease-*`, `--t-*`).
 - `src/theme.js`: Appearance switch (Auto / White / Dark), per device in `ml.theme`; never synced or backed up.
 - `src/lock.js`: Face ID lock screen and Settings card (iPhone/iPad only, needs sign-in; a passkey is used only to ask for Face ID, stored per device in `ml.lock.cred`; the fallback is a local 4-digit passcode on a number pad (6-digit ones saved earlier keep working), hashed in `ml.lock.pass`, which works offline; the account password is only for a forgotten passcode and turns the lock off; `ml.lock.left` in sessionStorage stops an app-update reload from asking for Face ID again).

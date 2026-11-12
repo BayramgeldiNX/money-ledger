@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { isAndroid, osOf, isIOS, shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH, RELOCK_AFTER_MS } from "../src/lib/lock.js";
+import { isAndroid, osOf, isIOS } from "../src/lib/os.js";
+import { shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH, RELOCK_AFTER_MS } from "../src/lib/lock.js";
 
 describe("isIOS", () => {
   it("knows iPhone and iPad", () => {

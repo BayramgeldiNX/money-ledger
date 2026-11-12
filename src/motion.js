@@ -1,3 +1,5 @@
+import { esc, sleep, reduced } from "./util.js";
+export { reduced };
 // Motion helpers: small DOM-only pieces that make the app feel alive. Every one of them is skipped, or lands instantly,
 // when the phone asks for reduced motion. Money math never lives here: these only change how numbers and rows arrive.
 
@@ -5,9 +7,6 @@
 export const buzz = (ms = 10) => {
   try { if (/Android/i.test(navigator.userAgent) && !reduced() && navigator.vibrate) navigator.vibrate(ms); } catch (e) { /* no vibration here */ }
 };
-export const reduced = () => { try { return window.matchMedia("(prefers-reduced-motion: reduce)").matches; } catch (e) { return false; } };
-const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ---------- Rolling digits ----------
 // For each character of `next`: a plain character, or a digit with the digit it rolls from (0 when nothing was shown before).

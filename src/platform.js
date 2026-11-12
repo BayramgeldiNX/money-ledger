@@ -1,3 +1,4 @@
+import { isIOS as isIOSDevice } from "./lib/os.js";
 import { syncAvailable, currentUser, makeDb } from "./sync/firebase.js";
 
 // Stand-in for the pieces the claude.ai Artifact used to provide.
@@ -6,7 +7,7 @@ import { syncAvailable, currentUser, makeDb } from "./sync/firebase.js";
 //   "sample"    -> null: Claude-written money review and receipt reading are off in the standalone app.
 //   "downloads" -> a plain file download.
 
-const isIOS = /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+const isIOS = isIOSDevice(navigator);
 
 async function saveFile({ filename, data }) {
   const type = /\.csv$/i.test(filename) ? "text/csv;charset=utf-8" : /\.json$/i.test(filename) ? "application/json" : /\.pdf$/i.test(filename) ? "application/pdf" : "application/octet-stream";

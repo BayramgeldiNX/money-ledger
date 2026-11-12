@@ -1,6 +1,6 @@
 // Android Back button: closes the open sheet first, then goes Home, and only then leaves the app.
 // Does nothing on iPhone or desktop. The rules are in src/lib/backstack.js.
-import { isAndroid } from "./lib/lock.js";
+import { isAndroid } from "./lib/os.js";
 import { wantedDepth, planSync, onPop } from "./lib/backstack.js";
 
 let layers = [];       // highest first: { open(): bool, close() }
