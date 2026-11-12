@@ -3,12 +3,14 @@ import { isIOS, isAndroid } from "./lib/os.js";
 // lock screen on this device: it does not encrypt anything, and the data stays protected by the sign-in.
 // A 4-digit passcode is the everyday fallback and works offline. The account password is only for a forgotten
 // passcode, which is why turning the lock on needs a signed-in account.
-import { shouldRelock, toB64, fromB64, makePassRecord, checkPassword, pinLengthOf, waitAfterFails, PIN_LENGTH } from "./lib/lock.js";
+import { toB64, fromB64, makePassRecord, pinLengthOf, PIN_LENGTH, LOCK_KEYS, attemptPasscode, leftAtToRemember, onReturn, onStart } from "./lib/lock.js";
 import { currentUser, verifyPassword, authMessage } from "./sync/firebase.js";
 import { syncBack } from "./backnav.js";
 import { reduced, sleep } from "./motion.js";
+import { createStorage } from "./lib/storage.js";
 
-const KEY = "ml.lock.cred", PASS_KEY = "ml.lock.pass", FAILS_KEY = "ml.lock.fails", LEFT_KEY = "ml.lock.left";
+const KEY = LOCK_KEYS.cred, PASS_KEY = LOCK_KEYS.pass, FAILS_KEY = LOCK_KEYS.fails, LEFT_KEY = LOCK_KEYS.left;
+const lockStorage = createStorage({ getItem: (k) => localStorage.getItem(k), setItem: (k, v) => localStorage.setItem(k, v) });
 const read =(key) => { try { return JSON.parse(localStorage.getItem(key)); } catch (e) { return null; } };
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); } catch (e) { /* stays off */ } };
 const savedCred = () => { try { return localStorage.getItem(KEY); } catch (e) { return null; } };
@@ -65,14 +67,7 @@ async function askFaceId() {
 const savedPinLength = () => pinLengthOf(read(PASS_KEY));
 
 // Checks the passcode, counting wrong tries. Returns "" when it is right, or what to tell the owner.
-async function tryPasscode(pin) {
-  const fails = read(FAILS_KEY) || { n: 0, at: 0 };
-  const left = fails.at + waitAfterFails(fails.n) - Date.now();
-  if (left > 0) return "Too many tries. Wait " + Math.ceil(left / 1000) + " seconds.";
-  if (await checkPassword(pin, read(PASS_KEY))) { write(FAILS_KEY, { n: 0, at: 0 }); return ""; }
-  write(FAILS_KEY, { n: fails.n + 1, at: Date.now() });
-  return "Wrong passcode.";
-}
+const tryPasscode = (pin) => attemptPasscode(pin, lockStorage);
 
 // ---- The number pad: title, dots, and 0-9. onPin gets the digits when all of them are in. ----
 function makePad(host, { title, left, length, onPin }) {
@@ -254,8 +249,9 @@ function lockNow() {
 // last open goes in sessionStorage (it survives a reload, not closing the app), under the same one-minute rule.
 function saveLeftAt() {
   try {
-    if (locked || !savedCred()) sessionStorage.removeItem(LEFT_KEY);
-    else sessionStorage.setItem(LEFT_KEY, String(hiddenAt || Date.now()));
+    const at = leftAtToRemember({ locked, hasLock: !!savedCred(), hiddenAt, now: Date.now() });
+    if (at === null) sessionStorage.removeItem(LEFT_KEY);
+    else sessionStorage.setItem(LEFT_KEY, String(at));
   } catch (e) { /* it asks again */ }
 }
 function takeLeftAt() {
@@ -273,19 +269,15 @@ export async function startLock() {
     if (!savedCred()) return;
     if (document.hidden) { hiddenAt = Date.now(); showCover(); return; }
     const away = hiddenAt; hiddenAt = 0;
-    if (!away || locked) return;
-    if (shouldRelock(away, Date.now())) lockNow(); else openApp();
+    const next = onReturn({ away, locked, now: Date.now() });
+    if (next === "relock") lockNow(); else if (next === "open") openApp();
   });
   if (!savedCred()) return;
   const left = takeLeftAt();
-  if (shouldRelock(left, Date.now())) {
-    locked = true;
-    showCover();
-  } else if (document.hidden) {
-    // reloaded in the background: the time away still counts from when the owner left
-    hiddenAt = left;
-    showCover();
-  }
+  const start = onStart({ left, hidden: document.hidden, now: Date.now() });
+  if (start.lock) locked = true;
+  if (start.hiddenAt) hiddenAt = start.hiddenAt;
+  if (start.cover) showCover();
   let user;
   try { user = await currentUser(); } catch (e) { console.error(e); }
   // Signed out: a forgotten passcode would have no way back, and the account's data is not on screen anyway.
