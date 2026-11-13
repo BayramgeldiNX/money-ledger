@@ -21,12 +21,12 @@ export function mealParts(e) {
 // part of an entry in dollars (works for any currency)
 const usdPart = (e, part) => (Number(e.amount) > 0 ? (Number(e.usd) || 0) * part / Number(e.amount) : 0);
 
-// Tax and tips in one month ("YYYY-MM"), in dollars.
+// Tax and tips in one month ("YYYY-MM") or one year ("YYYY"), in dollars.
 export function taxMonth(expenses, key) {
   const reasons = new Map();
   let taxes = 0, meals = 0, tips = 0;
   for (const e of expenses || []) {
-    if (!e || typeof e.date !== "string" || e.date.slice(0, 7) !== key) continue;
+    if (!e || typeof e.date !== "string" || !e.date.startsWith(key)) continue;
     if (e.type === "income" || e.kind === "income") continue;
     if (e.cat === TAX_CAT) {
       const u = Number(e.usd) || 0;
@@ -40,4 +40,14 @@ export function taxMonth(expenses, key) {
   }
   const byReason = [...reasons].map(([reason, amount]) => ({ reason, amount: round2(amount) })).sort((a, b) => b.amount - a.amount);
   return { total: round2(taxes + meals), byReason, meals: round2(meals), tips: round2(tips) };
+}
+
+// the same for a whole year ("YYYY")
+export const taxYear = (expenses, year) => taxMonth(expenses, String(year));
+
+// The entries behind the tax view: Taxes section payments and meals with tax, newest first.
+export const isTaxEntry = (e) => !!e && e.type !== "income" && e.kind !== "income" && (e.cat === TAX_CAT || Number(e.tax) > 0);
+export function taxEntries(expenses, key) {
+  return (expenses || []).filter((e) => isTaxEntry(e) && typeof e.date === "string" && e.date.startsWith(key))
+    .sort((a, b) => (a.date === b.date ? (b.createdAt || 0) - (a.createdAt || 0) : a.date < b.date ? 1 : -1));
 }
