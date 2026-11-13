@@ -15,7 +15,7 @@ import { firstEntryDate, daysSoFar, pctChange, isSamePct, monthPace, weekStats a
 import { buildBackup, newEntryCount, planRestore, applyRestorePlan } from "./lib/backup.js";
 import { openStore, browserStorage } from "./store.js";
 import { KIND_LABEL, normalizeConfig, intlStart, isBlankAccount, withTaxSections } from "./lib/config.js";
-import { hasTaxTip, TAX_CAT, TAX_REASONS, pctOf, mealTotal, mealParts, taxMonth } from "./lib/tip.js";
+import { hasTaxTip, TAX_CAT, TAX_REASONS, pctOf, mealTotal, mealParts, taxMonth, taxYear, taxEntries } from "./lib/tip.js";
 import { uid } from "./lib/ids.js";
 import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, afterSet, moneyOn, walletBalanceOn, walletMoves as walletMovesOf, inWalletCur as inWalletCurOf, wToRmb as wToRmbOf, cleanExpenses, cleanDebts, cleanTransfers, backupProblem, settingsToSave, withRealRate } from "./lib/ledger.js";
 
@@ -327,6 +327,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     // tapping the Settings tab while already on it must not throw away what you typed
     if (v === "settings" && changed) { state.settingsDirty = false; renderSettings(); }
     if (v !== "limits") state.limEdit = null;
+    if (v !== "report" || changed) state.taxOpen = false;
     if (v === "report") { lastReportAnim = null; playedCards.clear(); }
     pref.set("view", v);
     renderAll();
@@ -1862,16 +1863,38 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     cards.forEach((c) => { if (!playedCards.has(c.dataset.pk)) reportObserver.observe(c); });
   }
   const heroCount = (el) => { const t = el.querySelector(".report-hero .total[data-v]"); if (t) countUp(t, "rep-" + state.reportMode, Number(t.dataset.v), rmb0); };
-  // International only: the Tax this month block (the sums come from taxMonth in src/lib/tip.js)
-  function taxHTML(key) {
+  // International only. Report → Month shows one line; tapping it opens the Tax screen (sums from src/lib/tip.js).
+  function taxLineHTML(key) {
     if (!isIntl()) return "";
     const t = taxMonth(state.expenses, key);
-    const row = (label, v) => '<li><span>' + esc(label) + '</span><b>' + esc(usd0(v)) + "</b></li>";
-    if (!(t.total > 0) && !(t.tips > 0)) return '<div class="card tax-report" id="r-tax"><div class="head"><h2>Tax this month</h2></div><p class="hint" style="margin:0">No tax this month</p></div>';
-    return '<div class="card stack tax-report" id="r-tax"><div class="head"><h2>Tax this month</h2></div>' +
-      '<div class="tax-total out-amt">' + esc(usd0(t.total)) + "</div>" +
-      (t.total > 0 ? '<ul class="tax-rows">' + t.byReason.map((r) => row(r.reason, r.amount)).join("") + (t.meals > 0 ? row("Sales tax at cafes & restaurants", t.meals) : "") + "</ul>" : "") +
-      (t.tips > 0 ? '<ul class="tax-rows tips"><li><span>Tips this month</span><b>' + esc(usd0(t.tips)) + "</b></li></ul>" : "") + "</div>";
+    return '<button type="button" class="card tax-line" id="r-tax-open"><span class="tl-name">Tax this month</span><b class="tl-amt' + (t.total > 0 ? " out-amt" : "") + '">' + esc(usd0(t.total)) + '</b><span class="tl-go" aria-hidden="true">›</span></button>';
+  }
+  function taxRowsHTML(t) {
+    const row = (label, v) => "<li><span>" + esc(label) + "</span><b>" + esc(usd0(v)) + "</b></li>";
+    return '<ul class="tax-rows">' + t.byReason.map((r) => row(r.reason, r.amount)).join("") + (t.meals > 0 ? row("Sales tax at cafes & restaurants", t.meals) : "") +
+      (t.tips > 0 ? '<li class="tips"><span>Tips (not tax)</span><b>' + esc(usd0(t.tips)) + "</b></li>" : "") + "</ul>";
+  }
+  // The Tax screen: this month by kind, the whole year, then every tax payment (tap one to change it)
+  function taxScreenHTML() {
+    const key = state.month, year = key.slice(0, 4), m = taxMonth(state.expenses, key), y = taxYear(state.expenses, year), list = taxEntries(state.expenses, key);
+    const nothing = (t) => !(t.total > 0) && !(t.tips > 0);
+    const block = (id, title, sub, t, empty) => '<div class="card stack tax-report" id="' + id + '"><div class="head"><h2>' + esc(title) + "</h2>" + (sub ? '<span class="hint">' + esc(sub) + "</span>" : "") + "</div>" +
+      (nothing(t) ? '<p class="hint" style="margin:0">' + esc(empty) + "</p>" : '<div class="tax-total' + (t.total > 0 ? " out-amt" : "") + '">' + esc(usd0(t.total)) + "</div>" + taxRowsHTML(t)) + "</div>";
+    return '<div class="tax-screen stack" id="tax-screen">' +
+      '<div class="tax-top"><button type="button" class="tax-back" id="tax-back">‹ Report</button></div>' +
+      '<div class="tax-month"><button type="button" class="tm-arrow" id="tax-prev" aria-label="Previous month">‹</button><h1>Tax · ' + esc(monthName(key)) + '</h1><button type="button" class="tm-arrow" id="tax-next" aria-label="Next month">›</button></div>' +
+      block("tax-this-month", "This month", "", m, "No tax this month") +
+      block("tax-this-year", "Whole year " + year, "for filing taxes", y, "No tax this year yet") +
+      '<div class="card" id="tax-list"><div class="head"><h2>Tax payments</h2><span class="hint">' + esc(monthName(key, { month: "long" })) + "</span></div>" +
+        (list.length ? '<div class="entries" style="margin-top:6px">' + list.map((e) => entryHTML(e, "week")).join("") + "</div>" : '<p class="hint" style="margin:6px 0 0">Nothing yet. Add tax in the Taxes section, or tax on a Food or Coffee entry.</p>') + "</div>" +
+      "</div>";
+  }
+  function openTax() { state.taxOpen = true; renderReport(); syncBack(); window.scrollTo({ top: 0 }); }
+  function closeTax() { state.taxOpen = false; renderReport(); syncBack(); window.scrollTo({ top: 0 }); }
+  function bindTax(el) {
+    el.querySelector("#tax-back").onclick = closeTax;
+    el.querySelector("#tax-prev").onclick = () => $("m-prev").click();
+    el.querySelector("#tax-next").onclick = () => $("m-next").click();
   }
   function renderReport() {
     const key = state.month, s = statsFor(key), prev = statsFor(shiftMonth(key, -1));
@@ -1879,6 +1902,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     const animKey = state.reportMode + "|" + (state.reportMode === "week" ? weekStart() : state.reportMode === "day" ? dayOf() : key);
     const toggle = '<div class="mode-row on-bg"><div class="seg" role="group" aria-label="Report period"><button type="button" data-mode="day" aria-pressed="' + (state.reportMode === "day") + '">Day</button><button type="button" data-mode="week" aria-pressed="' + (state.reportMode === "week") + '">Week</button><button type="button" data-mode="month" aria-pressed="' + (state.reportMode === "month") + '">Month</button><button type="button" data-mode="year" aria-pressed="' + (state.reportMode === "year") + '">Year</button></div></div>';
     if (!state.loaded) { el.innerHTML = '<div class="card">' + skeletonRows(4) + "</div>"; return; }
+    if (state.taxOpen && isIntl()) { el.innerHTML = taxScreenHTML(); bindTax(el); bindEntries(el); return; }
     if (state.reportMode === "year") { el.innerHTML = toggle + yearHTML(); bindMode(el); heroCount(el); playOnView(el, animKey); return; }
     if (state.reportMode === "day") { el.innerHTML = toggle + dayReportHTML(); bindMode(el); bindDay(el); bindRunCharts(el); bindEntries(el); heroCount(el); playOnView(el, animKey); return; }
     if (state.reportMode === "week") { el.innerHTML = toggle + weekReportHTML(); bindMode(el); bindWeek(el); bindRunCharts(el); bindEntries(el); heroCount(el); playOnView(el, animKey); return; }
@@ -1929,7 +1953,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
         '<div><div class="lbl"><span class="dot k-' + k + '"></span>' + l + '</div><div class="val">' + Math.round(kp(kb[k])) + '%</div><div class="tgt">' + rmb0(kb[k]) + (inc > 0 ? " · goal " + t : "") + "</div></div>").join("") + "</div></div>";
     const big = s.list.slice().sort((a, b) => R(b) - R(a)).slice(0, 3);
     html += '<div class="card"><div class="head"><h2>Biggest 3</h2></div><div class="entries" style="margin-top:6px">' + big.map(entryHTML).join("") + "</div></div></div></div>";
-    html += taxHTML(key) + patternsHTML(key, s);
+    html += taxLineHTML(key) + patternsHTML(key, s);
     el.innerHTML = toggle + html;
     bindEntries(el);
     bindMode(el);
@@ -1937,6 +1961,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
     bindReview(el, key);
     heroCount(el);
     playOnView(el, animKey);
+    const to = el.querySelector("#r-tax-open"); if (to) to.onclick = openTax;
     const sg = el.querySelector("#stmt-go"); if (sg) sg.onclick = () => makeStatement(key, sg);
   }
 
@@ -2859,6 +2884,7 @@ import { R, U, isInc, isSave, isSpend, statsOf, monthList as monthListOf, wCur, 
       { open: () => !$("csheet").hidden, close: closeCalSheet },
       { open: () => !$("dsheet").hidden, close: closeDebtSheet },
       { open: () => !$("sheet").hidden, close: closeSheet },
+      { open: () => state.view === "report" && !!state.taxOpen, close: closeTax },
       { open: () => state.view !== "home", close: () => setView("home") },
     ]);
   }

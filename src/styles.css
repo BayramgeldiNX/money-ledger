@@ -348,6 +348,17 @@ main { padding-block: 0 110px; }
 .tax-rows li span { color: var(--muted); min-width: 0; }
 .tax-rows li b { font-weight: 700; white-space: nowrap; }
 .tax-rows.tips { margin-top: 4px; }
+.tax-rows li.tips span { color: var(--muted); }
+/* Report line that opens the Tax screen, and the Tax screen itself */
+.tax-line { display: flex; align-items: center; gap: 10px; width: 100%; text-align: left; font: inherit; color: inherit; cursor: pointer; border-top: 0; border-left: 0; border-right: 0; }
+.tax-line .tl-name { flex: 1; font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+.tax-line .tl-amt { font-size: 17px; font-weight: 800; white-space: nowrap; }
+.tax-line .tl-go { color: var(--muted); font-size: 22px; line-height: 1; }
+.tax-top { display: flex; }
+.tax-back { background: none; border: 0; padding: 6px 0; font: inherit; font-size: 15px; font-weight: 600; color: var(--primary); cursor: pointer; }
+.tax-month { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tax-month h1 { font-size: 24px; font-weight: 800; text-align: center; flex: 1; min-width: 0; }
+.tm-arrow { width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--line); background: none; color: inherit; font-size: 22px; line-height: 1; cursor: pointer; flex: none; }
 .chip { display: inline-flex; align-items: center; gap: 7px; border: 0; background: var(--fill); box-shadow: var(--edge); padding: 7px 12px 7px 8px; border-radius: 999px; font-size: 13.5px; font-weight: 600; min-height: 38px; transition: background .15s, color .15s, transform .1s; }
 .chip.plain { padding-left: 12px; }
 .chip:active { transform: scale(.96); }
